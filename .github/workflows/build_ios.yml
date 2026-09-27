@@ -20,23 +20,54 @@ jobs:
           use-dotnet: false
           include-templates: true
 
+      - name: Verify Hollow Player Project
+        run: |
+          cd "$GITHUB_WORKSPACE/_hollow"
+          echo "Current directory:"
+          pwd
+          echo
+          echo "Project files:"
+          ls -la
+          echo
+          echo "Checking required files:"
+          test -f project.godot
+          test -f launcher.tscn
+          test -f launcher.gd
+          test -f export_presets.cfg
+          test -f icon.svg
+          echo "All required files found."
+
       - name: Import Godot Project
         run: |
-          godot --headless --editor --path "_hollow" --quit
+          cd "$GITHUB_WORKSPACE/_hollow"
+          godot --headless --editor --quit
 
       - name: Export Xcode Project from Godot
         run: |
-          mkdir -p build/ios
-          godot --headless --verbose --path "_hollow" --export-release "iOS" "build/ios/game.xcodeproj"
+          cd "$GITHUB_WORKSPACE/_hollow"
+          mkdir -p "$GITHUB_WORKSPACE/build/ios"
+
+          godot --headless --verbose \
+            --export-release "iOS" \
+            "$GITHUB_WORKSPACE/build/ios/game.xcodeproj"
+
+      - name: Verify Xcode Project
+        run: |
+          echo "Export directory:"
+          ls -la "$GITHUB_WORKSPACE/build/ios"
+
+          test -d "$GITHUB_WORKSPACE/build/ios/game.xcodeproj"
+
+          echo "Xcode project successfully created."
 
       - name: Build Xcode Archive
         run: |
           xcodebuild archive \
-            -project "build/ios/game.xcodeproj" \
+            -project "$GITHUB_WORKSPACE/build/ios/game.xcodeproj" \
             -scheme "game" \
             -sdk iphoneos \
             -configuration Release \
-            -archivePath "build/ios/game.xcarchive" \
+            -archivePath "$GITHUB_WORKSPACE/build/ios/game.xcarchive" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -48,8 +79,13 @@ jobs:
 
       - name: Package into IPA
         run: |
-          mkdir -p Payload
-          cp -r build/ios/game.xcarchive/Products/Applications/*.app Payload/
+          mkdir -p "$GITHUB_WORKSPACE/Payload"
+
+          cp -r \
+            "$GITHUB_WORKSPACE/build/ios/game.xcarchive/Products/Applications/"*.app \
+            "$GITHUB_WORKSPACE/Payload/"
+
+          cd "$GITHUB_WORKSPACE"
           zip -r game.ipa Payload
 
       - name: Upload IPA Artifact
