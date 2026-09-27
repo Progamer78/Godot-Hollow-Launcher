@@ -1,6 +1,5 @@
 extends Control
 
-
 # ============================================================
 # HOLLOW GODOT PLAYER
 # Generic Godot 4.x PCK launcher
@@ -8,12 +7,10 @@ extends Control
 
 const SAVES_DIR := "user://_hollow_saves"
 const LAST_PLAYED_FILE := "user://_last_played.txt"
-const LOG_PATH := "user://debug_log.txt"
 
 const SYSTEM_FILES := [
 	"_hollow_saves",
-	"_last_played.txt",
-	"debug_log.txt"
+	"_last_played.txt"
 ]
 
 const AUTOLOAD_SEARCH_PATHS := [
@@ -26,33 +23,17 @@ const AUTOLOAD_SEARCH_PATHS := [
 	"res://"
 ]
 
-# Used only when the PCK does not contain project.godot.
-# These are common foundational manager names and also preserve
-# the order used by I Can Smell You from Here.
 const AUTOLOAD_PRIORITY := [
-	"GameData",
-	"Global",
-	"Globals",
-	"GameState",
-	"RunState",
-	"MetaState",
-	"PlayerData",
-	"SaveData",
-	"Settings",
-	"DialogueManager",
-	"DialogManager",
-	"MusicManager",
-	"AudioManager",
-	"SoundManager",
-	"Sfx",
-	"SaveManager"
+	"GameData", "Global", "Globals", "GameState", "RunState",
+	"MetaState", "PlayerData", "SaveData", "Settings",
+	"DialogueManager", "DialogManager", "MusicManager",
+	"AudioManager", "SoundManager", "Sfx", "SaveManager"
 ]
 
-
+var log_file_path := ""
 var launch_in_progress := false
 var game_buttons: Array[Button] = []
 var loaded_game_autoloads: Array[Node] = []
-
 
 # ============================================================
 # LOGGING
@@ -60,39 +41,42 @@ var loaded_game_autoloads: Array[Node] = []
 
 func log_msg(message: String) -> void:
 	print(message)
+	if log_file_path == "":
+		return
 
 	var time_str := Time.get_time_string_from_system()
 	var line := "[" + time_str + "] " + message + "\n"
 
-	var file := FileAccess.open(LOG_PATH, FileAccess.READ_WRITE)
-
+	var file := FileAccess.open(log_file_path, FileAccess.READ_WRITE)
 	if file:
 		file.seek_end()
 		file.store_string(line)
 		file.close()
 	else:
-		file = FileAccess.open(LOG_PATH, FileAccess.WRITE)
-
+		file = FileAccess.open(log_file_path, FileAccess.WRITE)
 		if file:
 			file.store_string(line)
 			file.close()
-
 
 # ============================================================
 # STARTUP
 # ============================================================
 
 func _ready() -> void:
-	log_msg("")
-	log_msg("========================================")
-	log_msg("=== Hollow Player Started ===")
-	log_msg("========================================")
+	var datetime_string := Time.get_datetime_string_from_system().replace(":", "-").replace("T", "_")
+	log_file_path = "user://hollow_run_" + datetime_string + ".log"
+
+	log_msg("==================================================")
+	log_msg("HOLLOW GODOT PLAYER INITIALIZED")
+	log_msg("Engine Version: " + Engine.get_version_info().string)
+	log_msg("Active Log File: " + log_file_path)
+	log_msg("==================================================")
 
 	if not DirAccess.dir_exists_absolute(SAVES_DIR):
 		DirAccess.make_dir_recursive_absolute(SAVES_DIR)
+		log_msg("Created missing saves directory at: " + SAVES_DIR)
 
 	build_ui()
-
 
 # ============================================================
 # LAUNCHER UI
@@ -100,418 +84,240 @@ func _ready() -> void:
 
 func build_ui() -> void:
 	var vbox := VBoxContainer.new()
-
 	vbox.set_anchors_preset(PRESET_CENTER)
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-
 	add_child(vbox)
 
 	var title := Label.new()
-
 	title.text = "Hollow Godot Player\nSelect a .pck game."
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-
 	vbox.add_child(title)
 
 	var spacer := Control.new()
 	spacer.custom_minimum_size = Vector2(0, 20)
-
 	vbox.add_child(spacer)
 
 	var dir := DirAccess.open("user://")
-
 	if dir:
 		var files := dir.get_files()
-
 		files.sort()
 
 		for file_name in files:
-
 			if file_name.get_extension().to_lower() != "pck":
 				continue
 
 			var btn := Button.new()
-
 			btn.text = "Play: " + file_name
 			btn.custom_minimum_size = Vector2(320, 60)
-
-			btn.pressed.connect(
-				_on_play_pressed.bind(file_name)
-			)
-
+			btn.pressed.connect(_on_play_pressed.bind(file_name))
 			vbox.add_child(btn)
-
 			game_buttons.append(btn)
 
 	if game_buttons.is_empty():
-
 		var empty_label := Label.new()
-
 		empty_label.text = "No .pck files found."
 		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-
 		vbox.add_child(empty_label)
 
-
 # ============================================================
-# PLAY GAME
+# PLAY GAME SEQUENCE
 # ============================================================
 
 func _on_play_pressed(pck_name: String) -> void:
-
 	if launch_in_progress:
 		return
-
 	launch_in_progress = true
 
 	for button in game_buttons:
-
 		if is_instance_valid(button):
 			button.disabled = true
 
-
-	log_msg("")
-	log_msg("========================================")
-	log_msg("--- PLAY BUTTON PRESSED ---")
-	log_msg("Target PCK: " + pck_name)
-
+	log_msg("\n==================================================")
+	log_msg("INITIATING GAME LAUNCH SEQUENCE")
+	log_msg("Target File: " + pck_name)
+	log_msg("==================================================")
 
 	var pck_path := "user://".path_join(pck_name)
 
-
-	# --------------------------------------------------------
-	# CHECK FILE
-	# --------------------------------------------------------
-
 	if not FileAccess.file_exists(pck_path):
-
-		log_msg("ERROR: PCK does not exist.")
-		log_msg(pck_path)
-
+		log_msg("FATAL ERROR: Target PCK does not exist at path: " + pck_path)
 		reset_launcher()
 		return
 
-
-	log_msg("PCK file exists.")
-
-
-	# --------------------------------------------------------
-	# SAVE MANAGEMENT
-	# --------------------------------------------------------
-
+	# STEP 1: Manage Save Data Isolation
+	log_msg("\n[STEP 1] ISOLATING SAVE DATA")
 	manage_saves(pck_name)
 
-
-	# --------------------------------------------------------
-	# LOAD PCK
-	# --------------------------------------------------------
-
-	log_msg("Loading PCK...")
-
-	var loaded := ProjectSettings.load_resource_pack(
-		pck_path,
-		true
-	)
+	# STEP 2: Load the PCK File
+	log_msg("\n[STEP 2] MOUNTING PCK FILE")
+	log_msg("Attempting to overlay " + pck_name + " onto the virtual res:// filesystem...")
+	var loaded := ProjectSettings.load_resource_pack(pck_path, true)
 
 	if not loaded:
-
-		log_msg("ERROR: Failed to load PCK.")
-		log_msg("Path: " + pck_path)
-
+		log_msg("FATAL ERROR: Engine failed to load resource pack. The file may be corrupt or for an incompatible Godot version.")
 		reset_launcher()
 		return
+	log_msg("SUCCESS: PCK successfully mounted to res://.")
 
-
-	log_msg("SUCCESS: PCK loaded into memory.")
-
-
-	# --------------------------------------------------------
-	# READ GAME CONFIGURATION
-	# --------------------------------------------------------
-
+	# STEP 3: Extract Binary Project Settings
+	log_msg("\n[STEP 3] EXTRACTING COMPILED PROJECT SETTINGS")
 	var game_config := read_game_project_config()
 
 	if not game_config.is_empty():
-
-		log_msg("Game project configuration found inside PCK.")
-
-		apply_basic_game_settings(game_config)
-
+		log_msg("SUCCESS: Configuration map generated successfully.")
 	else:
+		log_msg("WARNING: No valid configuration map could be extracted. The game may operate unpredictably.")
 
-		log_msg(
-			"No project configuration found inside PCK."
-		)
+	# STEP 4: Apply Engine Overrides and Input Maps
+	log_msg("\n[STEP 4] INJECTING CONFIGURATION & REBUILDING INPUT MAPS")
+	apply_engine_overrides(game_config)
 
-		log_msg(
-			"Using automatic discovery."
-		)
-
-
-	# --------------------------------------------------------
-	# CREATE GAME AUTOLOADS
-	# --------------------------------------------------------
-
-	var autoloads_ok := setup_game_autoloads(
-		game_config
-	)
-
+	# STEP 5: Initialize Autoload Singletons
+	log_msg("\n[STEP 5] INSTANTIATING AUTOLOAD MANAGERS")
+	var autoloads_ok := setup_game_autoloads(game_config)
 	if not autoloads_ok:
+		log_msg("WARNING: No autoloads initialized. If this game requires background managers, it will likely crash or hang on a debug screen.")
 
-		log_msg(
-			"WARNING: No game autoloads were discovered."
-		)
-
-	else:
-
-		log_msg(
-			"Game autoload setup completed."
-		)
-
-
-	# --------------------------------------------------------
-	# WAIT ONE FRAME
-	#
-	# This gives newly-created autoload nodes time to enter
-	# the scene tree and run their _ready() methods.
-	# --------------------------------------------------------
-
+	# Wait for singleton _ready calls to finish
+	log_msg("Awaiting next engine frame to allow Autoload _ready() functions to execute...")
 	await get_tree().process_frame
 
-
-	# --------------------------------------------------------
-	# FIND MAIN SCENE
-	# --------------------------------------------------------
-
-	var main_scene := find_game_main_scene(
-		game_config
-	)
+	# STEP 6: Identify and Launch Main Scene
+	log_msg("\n[STEP 6] LOCATING AND BOOTING MAIN SCENE")
+	var main_scene := find_game_main_scene(game_config)
 
 	if main_scene == "":
-
-		log_msg(
-			"ERROR: Could not find a playable main scene."
-		)
-
+		log_msg("FATAL ERROR: No eligible main scene discovered in configuration or PCK root.")
 		reset_launcher()
 		return
 
-
-	log_msg(
-		"Detected main scene: "
-		+ main_scene
-	)
-
-
-	# --------------------------------------------------------
-	# VERIFY SCENE
-	# --------------------------------------------------------
+	log_msg("Target Main Scene identified as: " + main_scene)
 
 	if not ResourceLoader.exists(main_scene):
-
-		log_msg(
-			"ERROR: ResourceLoader cannot find:"
-		)
-
-		log_msg(main_scene)
-
+		log_msg("FATAL ERROR: Engine reports main scene does not exist in the mounted res:// filesystem.")
 		reset_launcher()
 		return
 
-
+	log_msg("Loading main scene resource into memory...")
 	var packed_scene = ResourceLoader.load(main_scene)
 
-
-	if packed_scene == null:
-
-		log_msg(
-			"ERROR: Main scene could not be loaded:"
-		)
-
-		log_msg(main_scene)
-
+	if packed_scene == null or not packed_scene is PackedScene:
+		log_msg("FATAL ERROR: The resource at " + main_scene + " is not a valid PackedScene.")
 		reset_launcher()
 		return
 
-
-	if not packed_scene is PackedScene:
-
-		log_msg(
-			"ERROR: Main scene is not a PackedScene:"
-		)
-
-		log_msg(main_scene)
-
+	if not packed_scene.can_instantiate():
+		log_msg("FATAL ERROR: The PackedScene cannot be instantiated. It may have missing dependencies.")
 		reset_launcher()
 		return
 
-
-	var scene := packed_scene as PackedScene
-
-
-	if not scene.can_instantiate():
-
-		log_msg(
-			"ERROR: Main scene cannot be instantiated:"
-		)
-
-		log_msg(main_scene)
-
-		reset_launcher()
-		return
-
-
-	log_msg(
-		"SUCCESS: Main scene loaded."
-	)
-
-	log_msg(
-		"Starting game..."
-	)
-
-
-	# --------------------------------------------------------
-	# START GAME
-	# --------------------------------------------------------
-
-	var error := get_tree().change_scene_to_packed(scene)
-
+	log_msg("Executing active scene replacement...")
+	var error := get_tree().change_scene_to_packed(packed_scene)
 
 	if error != OK:
-
-		log_msg(
-			"ERROR: Scene change failed."
-		)
-
-		log_msg(
-			"Error code: " + str(error)
-		)
-
+		log_msg("FATAL ERROR: Engine failed to swap the scene tree. Error Code: " + str(error))
 		reset_launcher()
 		return
 
-
-	log_msg(
-		"SUCCESS: Game started."
-	)
-
-	log_msg("========================================")
-
+	log_msg("==================================================")
+	log_msg("SUCCESS: GAME BOOT SEQUENCE COMPLETE")
+	log_msg("Control successfully transferred to " + pck_name)
+	log_msg("==================================================")
 
 # ============================================================
-# READ CONFIGURATION FROM PCK
+# CONFIGURATION PARSING
 # ============================================================
 
 func read_game_project_config() -> Dictionary:
-
 	var settings := {}
 
+	# Fallback for text-based project files
 	if ResourceLoader.exists("res://project.godot"):
-
+		log_msg("Text-based project.godot found. Parsing INI format...")
 		var config := ConfigFile.new()
-
-		var error := config.load(
-			"res://project.godot"
-		)
-
-		if error == OK:
+		if config.load("res://project.godot") == OK:
 			for section in config.get_sections():
 				for key in config.get_section_keys(section):
 					settings[section + "/" + key] = config.get_value(section, key)
-
 			return settings
 
-
 	if FileAccess.file_exists("res://project.binary"):
-
+		log_msg("Compiled project.binary found. Executing sequential byte deserialization...")
 		var file := FileAccess.open("res://project.binary", FileAccess.READ)
 
 		if file:
 			var magic := file.get_32()
-
 			if magic == 0x43464745 or magic == 0x47464345:
+				log_msg("Valid ECFG magic header verified.")
 				var _version := file.get_32()
 				var count := file.get_32()
+				log_msg("Declared settings block count: " + str(count))
 
+				var parsed_keys := 0
 				if count > 0 and count < 65536:
 					for i in range(count):
-
 						if file.get_position() >= file.get_length():
+							log_msg("Parsing halted: Reached EOF unexpectedly at index " + str(i))
 							break
 
 						var key = file.get_var()
 						var val = file.get_var()
 
-						if key != null and val != null:
+						if key != null and key is String and val != null:
 							if typeof(val) == TYPE_DICTIONARY and val.has("value"):
-								settings[str(key)] = val["value"]
+								settings[key] = val["value"]
 							else:
-								settings[str(key)] = val
-
+								settings[key] = val
+							parsed_keys += 1
+				log_msg("Deserialization complete. Parsed " + str(parsed_keys) + " valid setting pairs.")
+			else:
+				log_msg("Parsing failed: Invalid magic header in project.binary.")
 			file.close()
-
-
-	for key in settings.keys():
-		ProjectSettings.set_setting(key, settings[key])
+	else:
+		log_msg("No project.binary file detected in the exported pack.")
 
 	return settings
 
-
 # ============================================================
-# APPLY BASIC PROJECT SETTINGS
+# INJECT SETTINGS & INPUTS
 # ============================================================
 
-func apply_basic_game_settings(
-	config: Dictionary
-) -> void:
+func apply_engine_overrides(config: Dictionary) -> void:
+	var total_applied := 0
+	for key in config.keys():
+		ProjectSettings.set_setting(key, config[key])
+		total_applied += 1
+	
+	log_msg("Injected " + str(total_applied) + " variables into the global ProjectSettings object.")
 
+	# UI Scaling Setup
 	var width = config.get("display/window/size/viewport_width", null)
 	var height = config.get("display/window/size/viewport_height", null)
 
-	if width is int and height is int:
+	if width is int and height is int and width > 0 and height > 0:
+		get_window().content_scale_size = Vector2i(width, height)
+		get_window().content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+		log_msg("Viewport rendering bounds dynamically adjusted to: " + str(width) + "x" + str(height))
+	else:
+		log_msg("No valid viewport dimensions found. Inheriting launcher default scaling.")
 
-		if width > 0 and height > 0:
-
-			get_window().content_scale_size = Vector2i(
-				width,
-				height
-			)
-
-			get_window().content_scale_mode = (
-				Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
-			)
-
-			log_msg(
-				"Applied game content size: "
-				+ str(width)
-				+ "x"
-				+ str(height)
-			)
-
+	# InputMap Rebuild
+	log_msg("Rebuilding engine InputMap from updated ProjectSettings...")
+	InputMap.load_from_project_settings()
+	log_msg("InputMap reconstruction complete. Game-specific keybinds and virtual inputs are now active.")
 
 # ============================================================
-# AUTOLOAD SETUP
+# AUTOLOAD INJECTION
 # ============================================================
 
-func setup_game_autoloads(
-	config: Dictionary
-) -> bool:
-
+func setup_game_autoloads(config: Dictionary) -> bool:
 	clear_previous_game_autoloads()
-
 
 	var found_entries: Array[Dictionary] = []
 
-
-	# --------------------------------------------------------
-	# METHOD 1:
-	# Exact autoload list from the game's configuration
-	# --------------------------------------------------------
-
+	# Method 1: Extract strictly from project.binary
 	for key in config.keys():
-
 		if key.begins_with("autoload/"):
-
 			var autoload_name = key.trim_prefix("autoload/")
 			var autoload_value = config[key]
 
@@ -519,7 +325,6 @@ func setup_game_autoloads(
 				continue
 
 			var path := str(autoload_value)
-
 			var is_singleton := path.begins_with("*")
 
 			if is_singleton:
@@ -534,159 +339,70 @@ func setup_game_autoloads(
 				"is_singleton": is_singleton
 			})
 
-
 	if not found_entries.is_empty():
-
-		log_msg(
-			"Using autoload order from configuration."
-		)
-
+		log_msg("Explicit Autoload mappings found in configuration.")
 		for entry in found_entries:
-
-			load_autoload_entry(
-				entry["name"],
-				entry["path"],
-				entry["is_singleton"]
-			)
-
+			load_autoload_entry(entry["name"], entry["path"], entry["is_singleton"])
 		return not loaded_game_autoloads.is_empty()
 
-
-	# --------------------------------------------------------
-	# METHOD 2:
-	# Automatic folder discovery
-	# --------------------------------------------------------
-
-	log_msg(
-		"Searching for autoload scripts automatically..."
-	)
-
-
+	# Method 2: Manual Directory Crawl
+	log_msg("No explicit mappings found. Falling back to heuristic directory search...")
 	var candidates: Array[Dictionary] = []
 
 	for folder in AUTOLOAD_SEARCH_PATHS:
-
-		if not ResourceLoader.exists(
-			folder
-		):
+		if not ResourceLoader.exists(folder):
 			continue
-
-		collect_autoload_resources(
-			folder,
-			candidates
-		)
-
+		collect_autoload_resources(folder, candidates)
 
 	if candidates.is_empty():
-
-		log_msg(
-			"No automatic autoload resources found."
-		)
-
 		return false
-
-
-	# --------------------------------------------------------
-	# Sort using preferred manager names first.
-	# --------------------------------------------------------
 
 	candidates.sort_custom(
 		func(a: Dictionary, b: Dictionary) -> bool:
-
 			var a_name := str(a["name"])
 			var b_name := str(b["name"])
-
-			var a_priority := autoload_priority(
-				a_name
-			)
-
-			var b_priority := autoload_priority(
-				b_name
-			)
-
+			var a_priority := autoload_priority(a_name)
+			var b_priority := autoload_priority(b_name)
 			if a_priority != b_priority:
 				return a_priority < b_priority
-
 			return a_name.to_lower() < b_name.to_lower()
 	)
 
-
 	for candidate in candidates:
-
-		load_autoload_entry(
-			candidate["name"],
-			candidate["path"],
-			true
-		)
-
+		load_autoload_entry(candidate["name"], candidate["path"], true)
 
 	return not loaded_game_autoloads.is_empty()
 
-
-# ============================================================
-# AUTOLOAD RESOURCE DISCOVERY
-# ============================================================
-
-func collect_autoload_resources(
-	folder_path: String,
-	results: Array[Dictionary]
-) -> void:
-
-	var entries := ResourceLoader.list_directory(
-		folder_path
-	)
-
-
+func collect_autoload_resources(folder_path: String, results: Array[Dictionary]) -> void:
+	var entries := ResourceLoader.list_directory(folder_path)
 	for entry in entries:
-
 		if entry.ends_with("/"):
-
 			var child_name := entry.trim_suffix("/")
-
-			var child_path := folder_path.path_join(
-				child_name
-			)
-
-			collect_autoload_resources(
-				child_path,
-				results
-			)
-
+			if child_name == "scenes" or child_name == "ui":
+				continue
+			collect_autoload_resources(folder_path.path_join(child_name), results)
 			continue
 
-
 		var lower := entry.to_lower()
-
 		var valid_script := lower.ends_with(".gd") or lower.ends_with(".gdc") or lower.ends_with(".gd.remap")
 		var valid_scene := lower.ends_with(".tscn") or lower.ends_with(".scn") or lower.ends_with(".tscn.remap")
-
 
 		if not (valid_script or valid_scene):
 			continue
 
-
-		var full_path := folder_path.path_join(
-			entry
-		)
-
+		var full_path := folder_path.path_join(entry)
 		if full_path.ends_with(".remap"):
 			full_path = full_path.trim_suffix(".remap")
 
-
 		var file_name := entry.get_file()
-
 		if file_name.ends_with(".remap"):
 			file_name = file_name.trim_suffix(".remap")
-
 		var base_name := file_name.get_basename()
 
-
-		if base_name == "":
+		if base_name == "" or base_name == "launcher":
 			continue
 
-
 		var already_exists := false
-
 		for r in results:
 			if r["name"] == base_name:
 				already_exists = true
@@ -698,318 +414,85 @@ func collect_autoload_resources(
 				"path": full_path
 			})
 
-
-# ============================================================
-# AUTOLOAD PRIORITY
-# ============================================================
-
 func autoload_priority(name: String) -> int:
-
 	var lower := name.to_lower()
-
-	for i in range(
-		AUTOLOAD_PRIORITY.size()
-	):
-
-		if lower == (
-			str(AUTOLOAD_PRIORITY[i]).to_lower()
-		):
-
+	for i in range(AUTOLOAD_PRIORITY.size()):
+		if lower == str(AUTOLOAD_PRIORITY[i]).to_lower():
 			return i
-
-
 	return 1000
 
-
-# ============================================================
-# LOAD INDIVIDUAL AUTOLOAD
-# ============================================================
-
-func load_autoload_entry(
-	autoload_name: String,
-	path: String,
-	is_singleton: bool
-) -> void:
-
+func load_autoload_entry(autoload_name: String, path: String, is_singleton: bool) -> void:
 	if not is_singleton:
-
-		log_msg(
-			"Skipping non-singleton autoload: "
-			+ autoload_name
-		)
-
 		return
 
-
-	if get_tree().root.has_node(
-		autoload_name
-	):
-
-		log_msg(
-			"Autoload already exists: "
-			+ autoload_name
-		)
-
+	if get_tree().root.has_node(autoload_name):
 		return
-
 
 	var clean_path := path
-
 	if clean_path.ends_with(".remap"):
 		clean_path = clean_path.trim_suffix(".remap")
 
-
-	log_msg(
-		"Loading autoload: "
-		+ autoload_name
-		+ " -> "
-		+ clean_path
-	)
-
-
 	if not ResourceLoader.exists(clean_path):
-		
-		log_msg(
-			"WARNING: Autoload resource does not exist: "
-			+ clean_path
-		)
-		
+		log_msg("FAILED to load singleton '" + autoload_name + "'. Target path missing: " + clean_path)
 		return
-
 
 	var ext := clean_path.get_extension().to_lower()
 
-
-	# --------------------------------------------------------
-	# GDScript autoload
-	# --------------------------------------------------------
-
 	if ext == "gd" or ext == "gdc":
-
-		var script = ResourceLoader.load(
-			clean_path
-		)
-
-
-		if script == null:
-
-			log_msg(
-				"WARNING: Could not load autoload script: "
-				+ clean_path
-			)
-
-			return
-
-
-		if not script is Script:
-
-			log_msg(
-				"WARNING: Autoload resource is not a Script: "
-				+ clean_path
-			)
-
-			return
-
-
-		var instance = script.new()
-
-
-		if instance == null:
-
-			log_msg(
-				"WARNING: Could not instantiate: "
-				+ clean_path
-			)
-
-			return
-
-
-		if not instance is Node:
-
-			log_msg(
-				"WARNING: Autoload script does not inherit Node: "
-				+ clean_path
-			)
-
-			return
-
-
-		var node := instance as Node
-
-		node.name = autoload_name
-
-		get_tree().root.add_child(node)
-
-		loaded_game_autoloads.append(node)
-
-		log_msg(
-			"  Autoload started: "
-			+ autoload_name
-		)
-
+		var script = ResourceLoader.load(clean_path)
+		if script is Script:
+			var instance = script.new()
+			if instance != null and instance is Node:
+				instance.name = autoload_name
+				get_tree().root.add_child(instance)
+				loaded_game_autoloads.append(instance)
+				log_msg("-> Attached GDScript Singleton: " + autoload_name + " (" + clean_path + ")")
+			else:
+				log_msg("FAILED: Singleton script " + autoload_name + " does not inherit from Node.")
 		return
-
-
-	# --------------------------------------------------------
-	# PackedScene autoload
-	# --------------------------------------------------------
 
 	if ext == "tscn" or ext == "scn":
-
-		var resource = ResourceLoader.load(
-			clean_path
-		)
-
-
-		if resource == null:
-
-			log_msg(
-				"WARNING: Could not load autoload scene: "
-				+ clean_path
-			)
-
-			return
-
-
-		if not resource is PackedScene:
-
-			log_msg(
-				"WARNING: Autoload is not a PackedScene: "
-				+ clean_path
-			)
-
-			return
-
-
-		var packed := resource as PackedScene
-
-		var node := packed.instantiate()
-
-
-		if node == null:
-
-			log_msg(
-				"WARNING: Could not instantiate autoload scene: "
-				+ clean_path
-			)
-
-			return
-
-
-		node.name = autoload_name
-
-		get_tree().root.add_child(node)
-
-		loaded_game_autoloads.append(node)
-
-		log_msg(
-			"  Autoload scene started: "
-			+ autoload_name
-		)
-
+		var resource = ResourceLoader.load(clean_path)
+		if resource is PackedScene:
+			var node := resource.instantiate()
+			if node != null:
+				node.name = autoload_name
+				get_tree().root.add_child(node)
+				loaded_game_autoloads.append(node)
+				log_msg("-> Attached PackedScene Singleton: " + autoload_name + " (" + clean_path + ")")
+			else:
+				log_msg("FAILED: Singleton scene " + autoload_name + " could not be instantiated.")
 		return
 
-
-	log_msg(
-		"WARNING: Unsupported autoload type: "
-		+ clean_path
-	)
-
-
-# ============================================================
-# CLEAR PREVIOUS AUTOLOADS
-# ============================================================
-
 func clear_previous_game_autoloads() -> void:
-
 	for node in loaded_game_autoloads:
-
 		if is_instance_valid(node):
-
 			node.queue_free()
-
-
 	loaded_game_autoloads.clear()
-
 
 # ============================================================
 # MAIN SCENE DISCOVERY
 # ============================================================
 
-func find_game_main_scene(
-	config: Dictionary
-) -> String:
-
-
-	# --------------------------------------------------------
-	# METHOD 1:
-	# The game's actual project configuration.
-	# --------------------------------------------------------
-
+func find_game_main_scene(config: Dictionary) -> String:
+	# Method 1: Config
 	if config.has("application/run/main_scene"):
-
 		var configured_scene = config["application/run/main_scene"]
+		if configured_scene is String and configured_scene != "":
+			if ResourceLoader.exists(configured_scene):
+				log_msg("Main scene located via project settings map.")
+				return configured_scene
+			else:
+				log_msg("WARNING: Configured main scene does not exist in res://. Falling back to scan.")
 
-
-		if configured_scene is String:
-
-			if configured_scene != "":
-
-				if ResourceLoader.exists(
-					configured_scene
-				):
-
-					log_msg(
-						"Using main_scene from project configuration:"
-					)
-
-					log_msg(
-						configured_scene
-					)
-
-					return configured_scene
-
-
-	# --------------------------------------------------------
-	# METHOD 2:
-	# Automatic scene discovery.
-	# --------------------------------------------------------
-
-	log_msg(
-		"Searching exported PCK for scenes..."
-	)
-
-
+	# Method 2: Scan
+	log_msg("Executing recursive scan of res:// for entry points...")
 	var scenes: Array[String] = []
-
-	collect_scene_resources(
-		"res://",
-		scenes
-	)
-
-
-	log_msg(
-		"Found "
-		+ str(scenes.size())
-		+ " scene resources."
-	)
-
+	collect_scene_resources("res://", scenes)
+	log_msg("Scan complete. Located " + str(scenes.size()) + " total scene files.")
 
 	if scenes.is_empty():
 		return ""
-
-
-	for scene_path in scenes:
-
-		log_msg(
-			"  SCENE: "
-			+ scene_path
-		)
-
-
-	# --------------------------------------------------------
-	# Priority Targets
-	# --------------------------------------------------------
 
 	var targets := [
 		"main.tscn", "mainscene.tscn", "start.tscn", "game.tscn",
@@ -1017,308 +500,109 @@ func find_game_main_scene(
 	]
 
 	for target in targets:
-
 		for scene_path in scenes:
-
 			if scene_path.get_file().to_lower() == target:
-
+				log_msg("Main scene located via naming heuristics priority match.")
 				return scene_path
-
-
-	# --------------------------------------------------------
-	# First scene at root (excluding debug/end)
-	# --------------------------------------------------------
 
 	for scene_path in scenes:
-
-		var relative := scene_path.trim_prefix(
-			"res://"
-		)
-
+		var relative := scene_path.trim_prefix("res://")
 		if "/" not in relative:
-
 			var lower_name := scene_path.get_file().to_lower()
-
 			if not ("debug" in lower_name or "end" in lower_name or "test" in lower_name):
-
+				log_msg("Main scene located via root directory default selection.")
 				return scene_path
-
-
-	# --------------------------------------------------------
-	# Last resort (alphabetical, excluding debug/end)
-	# --------------------------------------------------------
 
 	scenes.sort()
-
 	for scene_path in scenes:
-
 		var lower_name := scene_path.get_file().to_lower()
-
 		if not ("debug" in lower_name or "end" in lower_name or "test" in lower_name):
-
+			log_msg("Main scene located via alphabetical fallback.")
 			return scene_path
-
 
 	return scenes[0]
 
-
-# ============================================================
-# SCENE RESOURCE DISCOVERY
-# ============================================================
-
-func collect_scene_resources(
-	folder_path: String,
-	results: Array[String]
-) -> void:
-
-
-	var entries := ResourceLoader.list_directory(
-		folder_path
-	)
-
-
+func collect_scene_resources(folder_path: String, results: Array[String]) -> void:
+	var entries := ResourceLoader.list_directory(folder_path)
 	for entry in entries:
-
 		if entry.ends_with("/"):
-
 			var child_name := entry.trim_suffix("/")
-
-			if child_name == "_hollow":
-				continue
-
-			collect_scene_resources(
-				folder_path.path_join(
-					child_name
-				),
-				results
-			)
-
+			collect_scene_resources(folder_path.path_join(child_name), results)
 			continue
 
-
 		var lower := entry.to_lower()
-
 		if lower.ends_with(".tscn") or lower.ends_with(".scn") or lower.ends_with(".tscn.remap"):
-
-			var path := folder_path.path_join(
-				entry
-			)
-
+			var path := folder_path.path_join(entry)
 			if path.ends_with(".remap"):
 				path = path.trim_suffix(".remap")
-
-			if not path.to_lower().contains(
-				"/_hollow/"
-			) and not path.to_lower().ends_with("launcher.tscn"):
-
+			if not path.to_lower().ends_with("launcher.tscn"):
 				results.append(path)
-
 
 # ============================================================
 # SAVE MANAGEMENT
 # ============================================================
 
-func manage_saves(
-	next_game: String
-) -> void:
-
-
-	var dir := DirAccess.open(
-		"user://"
-	)
-
-
+func manage_saves(next_game: String) -> void:
+	var dir := DirAccess.open("user://")
 	if dir == null:
-
-		log_msg(
-			"WARNING: Could not open user://"
-		)
-
 		return
 
-
-	# --------------------------------------------------------
-	# BACK UP PREVIOUS GAME
-	# --------------------------------------------------------
-
-	if FileAccess.file_exists(
-		LAST_PLAYED_FILE
-	):
-
-		var last_game := FileAccess.get_file_as_string(
-			LAST_PLAYED_FILE
-		).strip_edges()
-
-
+	if FileAccess.file_exists(LAST_PLAYED_FILE):
+		var last_game := FileAccess.get_file_as_string(LAST_PLAYED_FILE).strip_edges()
 		if last_game != "":
-
-			var backup_path := SAVES_DIR.path_join(
-				last_game
-			)
-
-
-			if not DirAccess.dir_exists_absolute(
-				backup_path
-			):
-
-				DirAccess.make_dir_recursive_absolute(
-					backup_path
-				)
-
+			var backup_path := SAVES_DIR.path_join(last_game)
+			if not DirAccess.dir_exists_absolute(backup_path):
+				DirAccess.make_dir_recursive_absolute(backup_path)
 
 			var current_files := dir.get_files()
 			var current_dirs := dir.get_directories()
-
+			var moved_count := 0
 
 			for file_name in current_files:
-
-				if file_name in SYSTEM_FILES:
+				if file_name in SYSTEM_FILES or file_name.get_extension().to_lower() == "pck":
 					continue
-
-
-				if file_name.get_extension().to_lower() == "pck":
+				if file_name.begins_with("hollow_run_") and file_name.ends_with(".log"):
 					continue
-
-
-				var source := "user://".path_join(
-					file_name
-				)
-
-				var destination := backup_path.path_join(
-					file_name
-				)
-
-
-				var error := DirAccess.rename_absolute(
-					source,
-					destination
-				)
-
-
-				if error != OK:
-
-					log_msg(
-						"WARNING: Could not move file: "
-						+ source
-					)
-
+				var source := "user://".path_join(file_name)
+				var destination := backup_path.path_join(file_name)
+				if DirAccess.rename_absolute(source, destination) == OK:
+					moved_count += 1
 
 			for directory_name in current_dirs:
-
 				if directory_name in SYSTEM_FILES:
 					continue
+				var source := "user://".path_join(directory_name)
+				var destination := backup_path.path_join(directory_name)
+				if DirAccess.rename_absolute(source, destination) == OK:
+					moved_count += 1
+			
+			log_msg("Archived " + str(moved_count) + " files/folders from previous game: " + last_game)
 
-
-				var source := "user://".path_join(
-					directory_name
-				)
-
-				var destination := backup_path.path_join(
-					directory_name
-				)
-
-
-				var error := DirAccess.rename_absolute(
-					source,
-					destination
-				)
-
-
-				if error != OK:
-
-					log_msg(
-						"WARNING: Could not move directory: "
-						+ source
-					)
-
-
-	# --------------------------------------------------------
-	# RESTORE SELECTED GAME
-	# --------------------------------------------------------
-
-	var restore_path := SAVES_DIR.path_join(
-		next_game
-	)
-
-
-	if DirAccess.dir_exists_absolute(
-		restore_path
-	):
-
-		var restore_dir := DirAccess.open(
-			restore_path
-		)
-
-
+	var restore_path := SAVES_DIR.path_join(next_game)
+	if DirAccess.dir_exists_absolute(restore_path):
+		var restore_dir := DirAccess.open(restore_path)
 		if restore_dir:
+			var restored_count := 0
+			for file_name in restore_dir.get_files():
+				if DirAccess.rename_absolute(restore_path.path_join(file_name), "user://".path_join(file_name)) == OK:
+					restored_count += 1
+			for directory_name in restore_dir.get_directories():
+				if DirAccess.rename_absolute(restore_path.path_join(directory_name), "user://".path_join(directory_name)) == OK:
+					restored_count += 1
+			
+			log_msg("Restored " + str(restored_count) + " localized save files/folders for target game.")
 
-			var restore_files := restore_dir.get_files()
-			var restore_dirs := restore_dir.get_directories()
-
-
-			for file_name in restore_files:
-
-				var source := restore_path.path_join(
-					file_name
-				)
-
-				var destination := "user://".path_join(
-					file_name
-				)
-
-
-				DirAccess.rename_absolute(
-					source,
-					destination
-				)
-
-
-			for directory_name in restore_dirs:
-
-				var source := restore_path.path_join(
-					directory_name
-				)
-
-				var destination := "user://".path_join(
-					directory_name
-				)
-
-
-				DirAccess.rename_absolute(
-					source,
-					destination
-				)
-
-
-	# --------------------------------------------------------
-	# REMEMBER CURRENT GAME
-	# --------------------------------------------------------
-
-	var save_file := FileAccess.open(
-		LAST_PLAYED_FILE,
-		FileAccess.WRITE
-	)
-
-
+	var save_file := FileAccess.open(LAST_PLAYED_FILE, FileAccess.WRITE)
 	if save_file:
-
-		save_file.store_string(
-			next_game
-		)
-
+		save_file.store_string(next_game)
 		save_file.close()
-
 
 # ============================================================
 # RESET LAUNCHER
 # ============================================================
 
 func reset_launcher() -> void:
-
 	launch_in_progress = false
-
 	for button in game_buttons:
-
 		if is_instance_valid(button):
-
 			button.disabled = false
