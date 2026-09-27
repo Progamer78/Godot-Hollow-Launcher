@@ -20,10 +20,9 @@ jobs:
         use-dotnet: false
         include-templates: true
 
-    - name: Setup Dummy Icon & Import Assets
+    - name: Generate Dummy Icon & Import Assets
       run: |
-        curl -sL -o icon.png https://raw.githubusercontent.com/godotengine/godot/master/icon.png
-        # Run Godot headless once to force it to import the new icon.png
+        python3 -c "import zlib, struct; w, h = 1024, 1024; ihdr = struct.pack('!I4sIIBBBBB', 13, b'IHDR', w, h, 8, 2, 0, 0, 0); comp = zlib.compress(bytes((w * 3 + 1) * h)); idat = struct.pack('!I4s', len(comp), b'IDAT') + comp; iend = struct.pack('!I4s', 0, b'IEND'); f = open('icon.png', 'wb'); f.write(b'\x89PNG\r\n\x1a\n' + ihdr + struct.pack('!I', zlib.crc32(ihdr[4:])) + idat + struct.pack('!I', zlib.crc32(idat[4:])) + iend + struct.pack('!I', zlib.crc32(iend[4:]))); f.close()"
         godot --headless --editor --quit || true
 
     - name: Export Xcode Project from Godot
