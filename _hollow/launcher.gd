@@ -271,6 +271,9 @@ func _on_play_pressed(pck_name: String) -> void:
 
 	# --------------------------------------------------------
 	# WAIT ONE FRAME
+	#
+	# This gives newly-created autoload nodes time to enter
+	# the scene tree and run their _ready() methods.
 	# --------------------------------------------------------
 
 	await get_tree().process_frame
@@ -427,6 +430,7 @@ func read_game_project_config() -> Dictionary:
 			var magic := file.get_32()
 
 			if magic == 0x43464745 or magic == 0x47464345:
+				var _version := file.get_32()
 				var count := file.get_32()
 
 				if count > 0 and count < 65536:
@@ -439,10 +443,16 @@ func read_game_project_config() -> Dictionary:
 						var val = file.get_var()
 
 						if key != null and val != null:
-							settings[str(key)] = val
+							if typeof(val) == TYPE_DICTIONARY and val.has("value"):
+								settings[str(key)] = val["value"]
+							else:
+								settings[str(key)] = val
 
 			file.close()
 
+
+	for key in settings.keys():
+		ProjectSettings.set_setting(key, settings[key])
 
 	return settings
 
@@ -757,6 +767,16 @@ func load_autoload_entry(
 	)
 
 
+	if not ResourceLoader.exists(clean_path):
+		
+		log_msg(
+			"WARNING: Autoload resource does not exist: "
+			+ clean_path
+		)
+		
+		return
+
+
 	var ext := clean_path.get_extension().to_lower()
 
 
@@ -923,7 +943,7 @@ func find_game_main_scene(
 
 	# --------------------------------------------------------
 	# METHOD 1:
-	# The game's actual project.godot.
+	# The game's actual project configuration.
 	# --------------------------------------------------------
 
 	if config.has("application/run/main_scene"):
@@ -940,7 +960,7 @@ func find_game_main_scene(
 				):
 
 					log_msg(
-						"Using main_scene from project.godot:"
+						"Using main_scene from project configuration:"
 					)
 
 					log_msg(
@@ -1089,7 +1109,7 @@ func collect_scene_resources(
 
 			if not path.to_lower().contains(
 				"/_hollow/"
-			):
+			) and not path.to_lower().ends_with("launcher.tscn"):
 
 				results.append(path)
 
