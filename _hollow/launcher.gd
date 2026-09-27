@@ -229,18 +229,18 @@ func _on_play_pressed(pck_name: String) -> void:
 	# READ GAME CONFIGURATION
 	# --------------------------------------------------------
 
-	var game_settings := read_pck_config()
+	var game_config := read_game_project_config()
 
-	if not game_settings.is_empty():
+	if not game_config.is_empty():
 
-		log_msg("Game configuration extracted from PCK.")
+		log_msg("Game project configuration found inside PCK.")
 
-		apply_basic_game_settings(game_settings)
+		apply_basic_game_settings(game_config)
 
 	else:
 
 		log_msg(
-			"No configuration found inside PCK."
+			"No project configuration found inside PCK."
 		)
 
 		log_msg(
@@ -253,7 +253,7 @@ func _on_play_pressed(pck_name: String) -> void:
 	# --------------------------------------------------------
 
 	var autoloads_ok := setup_game_autoloads(
-		game_settings
+		game_config
 	)
 
 	if not autoloads_ok:
@@ -281,7 +281,7 @@ func _on_play_pressed(pck_name: String) -> void:
 	# --------------------------------------------------------
 
 	var main_scene := find_game_main_scene(
-		game_settings
+		game_config
 	)
 
 	if main_scene == "":
@@ -396,39 +396,53 @@ func _on_play_pressed(pck_name: String) -> void:
 
 
 # ============================================================
-# READ PROJECT.BINARY FROM PCK
+# READ CONFIGURATION FROM PCK
 # ============================================================
 
-func read_pck_config() -> Dictionary:
+func read_game_project_config() -> Dictionary:
 
 	var settings := {}
 
-	if FileAccess.file_exists("res://project.godot"):
+	if ResourceLoader.exists("res://project.godot"):
+
 		var config := ConfigFile.new()
-		if config.load("res://project.godot") == OK:
+
+		var error := config.load(
+			"res://project.godot"
+		)
+
+		if error == OK:
 			for section in config.get_sections():
 				for key in config.get_section_keys(section):
 					settings[section + "/" + key] = config.get_value(section, key)
+
 			return settings
 
+
 	if FileAccess.file_exists("res://project.binary"):
+
 		var file := FileAccess.open("res://project.binary", FileAccess.READ)
+
 		if file:
 			var magic := file.get_32()
+
 			if magic == 0x43464745 or magic == 0x47464345:
 				var count := file.get_32()
+
 				if count > 0 and count < 65536:
 					for i in range(count):
+
 						if file.get_position() >= file.get_length():
 							break
+
 						var key = file.get_var()
 						var val = file.get_var()
+
 						if key != null and val != null:
-							settings[String(key)] = val
+							settings[str(key)] = val
+
 			file.close()
 
-	for key in settings.keys():
-		ProjectSettings.set_setting(key, settings[key])
 
 	return settings
 
@@ -438,11 +452,11 @@ func read_pck_config() -> Dictionary:
 # ============================================================
 
 func apply_basic_game_settings(
-	settings: Dictionary
+	config: Dictionary
 ) -> void:
 
-	var width = settings.get("display/window/size/viewport_width", null)
-	var height = settings.get("display/window/size/viewport_height", null)
+	var width = config.get("display/window/size/viewport_width", null)
+	var height = config.get("display/window/size/viewport_height", null)
 
 	if width is int and height is int:
 
@@ -470,7 +484,7 @@ func apply_basic_game_settings(
 # ============================================================
 
 func setup_game_autoloads(
-	settings: Dictionary
+	config: Dictionary
 ) -> bool:
 
 	clear_previous_game_autoloads()
@@ -481,20 +495,21 @@ func setup_game_autoloads(
 
 	# --------------------------------------------------------
 	# METHOD 1:
-	# Exact autoload list from the game's binary config
+	# Exact autoload list from the game's configuration
 	# --------------------------------------------------------
 
-	for key in settings.keys():
+	for key in config.keys():
 
 		if key.begins_with("autoload/"):
 
 			var autoload_name = key.trim_prefix("autoload/")
-			var autoload_value = settings[key]
+			var autoload_value = config[key]
 
 			if not autoload_value is String:
 				continue
 
-			var path := String(autoload_value)
+			var path := str(autoload_value)
+
 			var is_singleton := path.begins_with("*")
 
 			if is_singleton:
@@ -513,7 +528,7 @@ func setup_game_autoloads(
 	if not found_entries.is_empty():
 
 		log_msg(
-			"Using autoload order from project.binary."
+			"Using autoload order from configuration."
 		)
 
 		for entry in found_entries:
@@ -568,8 +583,8 @@ func setup_game_autoloads(
 	candidates.sort_custom(
 		func(a: Dictionary, b: Dictionary) -> bool:
 
-			var a_name := String(a["name"])
-			var b_name := String(b["name"])
+			var a_name := str(a["name"])
+			var b_name := str(b["name"])
 
 			var a_priority := autoload_priority(
 				a_name
@@ -618,9 +633,6 @@ func collect_autoload_resources(
 
 			var child_name := entry.trim_suffix("/")
 
-			if child_name in ["_hollow", "scenes", "ui"]:
-				continue
-
 			var child_path := folder_path.path_join(
 				child_name
 			)
@@ -634,31 +646,33 @@ func collect_autoload_resources(
 
 
 		var lower := entry.to_lower()
+
 		var valid_script := lower.ends_with(".gd") or lower.ends_with(".gdc") or lower.ends_with(".gd.remap")
 		var valid_scene := lower.ends_with(".tscn") or lower.ends_with(".scn") or lower.ends_with(".tscn.remap")
+
 
 		if not (valid_script or valid_scene):
 			continue
 
 
-		var clean_name := entry.get_file()
-
-		if clean_name.ends_with(".remap"):
-			clean_name = clean_name.trim_suffix(".remap")
-
-		var base_name := clean_name.get_basename()
-
-
-		if base_name == "" or base_name == "launcher":
-			continue
-
-
-		var path := folder_path.path_join(
+		var full_path := folder_path.path_join(
 			entry
 		)
 
-		if path.ends_with(".remap"):
-			path = path.trim_suffix(".remap")
+		if full_path.ends_with(".remap"):
+			full_path = full_path.trim_suffix(".remap")
+
+
+		var file_name := entry.get_file()
+
+		if file_name.ends_with(".remap"):
+			file_name = file_name.trim_suffix(".remap")
+
+		var base_name := file_name.get_basename()
+
+
+		if base_name == "":
+			continue
 
 
 		var already_exists := false
@@ -671,7 +685,7 @@ func collect_autoload_resources(
 		if not already_exists:
 			results.append({
 				"name": base_name,
-				"path": path
+				"path": full_path
 			})
 
 
@@ -688,7 +702,7 @@ func autoload_priority(name: String) -> int:
 	):
 
 		if lower == (
-			String(AUTOLOAD_PRIORITY[i]).to_lower()
+			str(AUTOLOAD_PRIORITY[i]).to_lower()
 		):
 
 			return i
@@ -730,6 +744,7 @@ func load_autoload_entry(
 
 
 	var clean_path := path
+
 	if clean_path.ends_with(".remap"):
 		clean_path = clean_path.trim_suffix(".remap")
 
@@ -742,47 +757,75 @@ func load_autoload_entry(
 	)
 
 
-	if not ResourceLoader.exists(clean_path):
+	var ext := clean_path.get_extension().to_lower()
 
-		log_msg(
-			"WARNING: Resource does not exist: "
-			+ clean_path
+
+	# --------------------------------------------------------
+	# GDScript autoload
+	# --------------------------------------------------------
+
+	if ext == "gd" or ext == "gdc":
+
+		var script = ResourceLoader.load(
+			clean_path
 		)
 
-		return
 
-
-	var res = ResourceLoader.load(clean_path)
-
-
-	# --------------------------------------------------------
-	# Script autoload
-	# --------------------------------------------------------
-
-	if res is Script:
-
-		var instance = res.new()
-
-
-		if instance != null and instance is Node:
-
-			instance.name = autoload_name
-
-			get_tree().root.add_child(instance)
-
-			loaded_game_autoloads.append(instance)
+		if script == null:
 
 			log_msg(
-				"  Autoload script started: "
-				+ autoload_name
-			)
-
-		else:
-
-			log_msg(
-				"WARNING: Could not instantiate script or does not inherit Node: "
+				"WARNING: Could not load autoload script: "
 				+ clean_path
 			)
+
+			return
+
+
+		if not script is Script:
+
+			log_msg(
+				"WARNING: Autoload resource is not a Script: "
+				+ clean_path
+			)
+
+			return
+
+
+		var instance = script.new()
+
+
+		if instance == null:
+
+			log_msg(
+				"WARNING: Could not instantiate: "
+				+ clean_path
+			)
+
+			return
+
+
+		if not instance is Node:
+
+			log_msg(
+				"WARNING: Autoload script does not inherit Node: "
+				+ clean_path
+			)
+
+			return
+
+
+		var node := instance as Node
+
+		node.name = autoload_name
+
+		get_tree().root.add_child(node)
+
+		loaded_game_autoloads.append(node)
+
+		log_msg(
+			"  Autoload started: "
+			+ autoload_name
+		)
 
 		return
 
@@ -791,30 +834,58 @@ func load_autoload_entry(
 	# PackedScene autoload
 	# --------------------------------------------------------
 
-	if res is PackedScene:
+	if ext == "tscn" or ext == "scn":
 
-		var node := res.instantiate()
+		var resource = ResourceLoader.load(
+			clean_path
+		)
 
 
-		if node != null:
-
-			node.name = autoload_name
-
-			get_tree().root.add_child(node)
-
-			loaded_game_autoloads.append(node)
+		if resource == null:
 
 			log_msg(
-				"  Autoload scene started: "
-				+ autoload_name
+				"WARNING: Could not load autoload scene: "
+				+ clean_path
 			)
 
-		else:
+			return
+
+
+		if not resource is PackedScene:
+
+			log_msg(
+				"WARNING: Autoload is not a PackedScene: "
+				+ clean_path
+			)
+
+			return
+
+
+		var packed := resource as PackedScene
+
+		var node := packed.instantiate()
+
+
+		if node == null:
 
 			log_msg(
 				"WARNING: Could not instantiate autoload scene: "
 				+ clean_path
 			)
+
+			return
+
+
+		node.name = autoload_name
+
+		get_tree().root.add_child(node)
+
+		loaded_game_autoloads.append(node)
+
+		log_msg(
+			"  Autoload scene started: "
+			+ autoload_name
+		)
 
 		return
 
@@ -846,32 +917,37 @@ func clear_previous_game_autoloads() -> void:
 # ============================================================
 
 func find_game_main_scene(
-	settings: Dictionary
+	config: Dictionary
 ) -> String:
 
 
 	# --------------------------------------------------------
 	# METHOD 1:
-	# The game's project config.
+	# The game's actual project.godot.
 	# --------------------------------------------------------
 
-	if settings.has("application/run/main_scene"):
+	if config.has("application/run/main_scene"):
 
-		var configured_scene = settings["application/run/main_scene"]
+		var configured_scene = config["application/run/main_scene"]
 
 
-		if configured_scene is String and configured_scene != "":
+		if configured_scene is String:
 
-			if ResourceLoader.exists(
-				configured_scene
-			):
+			if configured_scene != "":
 
-				log_msg(
-					"Using main_scene from project configuration:\n"
-					+ configured_scene
-				)
+				if ResourceLoader.exists(
+					configured_scene
+				):
 
-				return configured_scene
+					log_msg(
+						"Using main_scene from project.godot:"
+					)
+
+					log_msg(
+						configured_scene
+					)
+
+					return configured_scene
 
 
 	# --------------------------------------------------------
@@ -916,7 +992,8 @@ func find_game_main_scene(
 	# --------------------------------------------------------
 
 	var targets := [
-		"main.tscn", "mainscene.tscn", "start.tscn", "game.tscn"
+		"main.tscn", "mainscene.tscn", "start.tscn", "game.tscn",
+		"main.tscn.remap", "mainscene.tscn.remap", "start.tscn.remap", "game.tscn.remap"
 	]
 
 	for target in targets:
@@ -1010,7 +1087,9 @@ func collect_scene_resources(
 			if path.ends_with(".remap"):
 				path = path.trim_suffix(".remap")
 
-			if not "/_hollow/" in path.to_lower() and path != "res://launcher.tscn":
+			if not path.to_lower().contains(
+				"/_hollow/"
+			):
 
 				results.append(path)
 
