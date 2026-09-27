@@ -1,0 +1,8 @@
+config_version=5
+
+[application]
+config/name="Hollow Godot Player"
+run/main_scene="res://_hollow/launcher.tscn"
+
+[rendering]
+renderer/rendering_method="mobile"
