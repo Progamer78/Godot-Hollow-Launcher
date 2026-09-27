@@ -419,7 +419,6 @@ func read_game_project_config() -> Dictionary:
 
 			if magic == 0x43464745 or magic == 0x47464345:
 				log_msg("-> Header magic string matches Godot configuration binary format.")
-				var _version := file.get_32()
 				var count := file.get_32()
 				
 				log_msg("-> Loop configured to extract " + str(count) + " variant key-value entries.")
@@ -432,14 +431,14 @@ func read_game_project_config() -> Dictionary:
 							log_msg("-> WARNING: EOF reached prematurely at index: " + str(i))
 							break
 
-						var key = file.get_var()
+						var key = file.get_pascal_string()
 						var val = file.get_var()
 
-						if key != null and val != null:
+						if key != "" and val != null:
 							if typeof(val) == TYPE_DICTIONARY and val.has("value"):
-								settings[str(key)] = val["value"]
+								settings[key] = val["value"]
 							else:
-								settings[str(key)] = val
+								settings[key] = val
 							parsed += 1
 					
 					log_msg("-> Extraction complete. Pulled " + str(parsed) + " configurations.")
@@ -623,7 +622,7 @@ func collect_autoload_resources(
 		return
 
 	for d in dir.get_directories():
-		if d in ["_hollow", "scenes", "ui"]:
+		if d.begins_with(".") or d in ["_hollow", "scenes", "ui"]:
 			continue
 
 		var child_path := folder_path.path_join(d)
@@ -961,7 +960,7 @@ func collect_scene_resources(
 
 	for d in dir.get_directories():
 
-		if d == "_hollow":
+		if d.begins_with(".") or d == "_hollow":
 			continue
 
 		var child_path := folder_path.path_join(d)
