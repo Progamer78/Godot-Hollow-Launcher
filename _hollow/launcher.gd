@@ -26,27 +26,16 @@ const AUTOLOAD_SEARCH_PATHS := [
 ]
 
 const AUTOLOAD_PRIORITY := [
-	"GameData",
-	"Global",
-	"Globals",
-	"GameState",
-	"RunState",
-	"MetaState",
-	"PlayerData",
-	"SaveData",
-	"Settings",
-	"DialogueManager",
-	"DialogManager",
-	"MusicManager",
-	"AudioManager",
-	"SoundManager",
-	"Sfx",
-	"SaveManager"
+	"GameData", "Global", "Globals", "GameState", "RunState",
+	"MetaState", "PlayerData", "SaveData", "Settings",
+	"DialogueManager", "DialogManager", "MusicManager",
+	"AudioManager", "SoundManager", "Sfx", "SaveManager"
 ]
 
 var launch_in_progress := false
 var game_buttons: Array[Button] = []
 var loaded_game_autoloads: Array[Node] = []
+var ui_container: VBoxContainer
 
 func log_msg(message: String) -> void:
 	print(message)
@@ -74,39 +63,78 @@ func _ready() -> void:
 	build_ui()
 
 func build_ui() -> void:
-	var vbox := VBoxContainer.new()
-	vbox.set_anchors_preset(PRESET_CENTER)
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	add_child(vbox)
+	for child in get_children():
+		child.queue_free()
+
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	var bg := ColorRect.new()
+	bg.color = Color(0.12, 0.12, 0.14, 1.0)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(center)
+
+	ui_container = VBoxContainer.new()
+	ui_container.custom_minimum_size = Vector2(400, 0)
+	ui_container.add_theme_constant_override("separation", 12)
+	center.add_child(ui_container)
+
+	refresh_ui_list()
+
+func refresh_ui_list() -> void:
+	for child in ui_container.get_children():
+		child.queue_free()
+	game_buttons.clear()
 
 	var title := Label.new()
-	title.text = "Hollow Godot Player\nSelect a .pck game."
+	title.text = "HOLLOW GODOT PLAYER"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(title)
+	ui_container.add_child(title)
 
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0, 20)
-	vbox.add_child(spacer)
+	var subtitle := Label.new()
+	subtitle.text = "Select a .pck file to launch"
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ui_container.add_child(subtitle)
+
+	var path_info := Label.new()
+	path_info.text = "Storage Path: " + OS.get_user_data_dir()
+	path_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	path_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ui_container.add_child(path_info)
 
 	var dir := DirAccess.open("user://")
+	var pck_found := false
+
 	if dir:
 		var files := dir.get_files()
 		files.sort()
+
 		for file_name in files:
 			if file_name.get_extension().to_lower() != "pck":
 				continue
+
+			pck_found = true
 			var btn := Button.new()
 			btn.text = "Play: " + file_name
-			btn.custom_minimum_size = Vector2(320, 60)
+			btn.custom_minimum_size = Vector2(360, 56)
 			btn.pressed.connect(_on_play_pressed.bind(file_name))
-			vbox.add_child(btn)
+			ui_container.add_child(btn)
 			game_buttons.append(btn)
 
-	if game_buttons.is_empty():
+	if not pck_found:
 		var empty_label := Label.new()
-		empty_label.text = "No .pck files found."
+		empty_label.text = "No .pck files detected.\nPlace your game .pck into the app folder via Files."
 		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		vbox.add_child(empty_label)
+		ui_container.add_child(empty_label)
+
+	var refresh_btn := Button.new()
+	refresh_btn.text = "Refresh File List"
+	refresh_btn.custom_minimum_size = Vector2(360, 44)
+	refresh_btn.pressed.connect(refresh_ui_list)
+	ui_container.add_child(refresh_btn)
 
 func _on_play_pressed(pck_name: String) -> void:
 	if launch_in_progress:
@@ -220,6 +248,9 @@ func get_pck_settings() -> Dictionary:
 						if key != null and val != null:
 							settings[String(key)] = val
 			file.close()
+
+	for key in settings.keys():
+		ProjectSettings.set_setting(key, settings[key])
 
 	return settings
 
