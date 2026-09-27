@@ -105,10 +105,6 @@ func _on_play_pressed(pck_name: String) -> void:
 		return
 
 	log_msg("PCK file exists.")
-
-	# Save management happens before mounting the game.
-	manage_saves(pck_name)
-
 	log_msg("Loading PCK...")
 
 	var success = ProjectSettings.load_resource_pack(
@@ -124,65 +120,56 @@ func _on_play_pressed(pck_name: String) -> void:
 
 	log_msg("SUCCESS: PCK loaded into memory.")
 
-	# Find the game's real entry scene automatically.
+	# Find the game's actual main scene automatically.
 	var main_scene = find_game_main_scene()
 
 	if main_scene == "":
 		log_msg("ERROR: Could not determine the game's main scene.")
-		log_msg("No usable project.godot main_scene was found,")
-		log_msg("and no suitable Main.tscn could be discovered.")
-
 		reset_launcher_state()
 		return
 
 	log_msg("Detected game main scene:")
 	log_msg(main_scene)
 
-	# Verify that Godot can actually see the scene.
+	# ResourceLoader.exists() understands exported/remapped resources.
 	if not ResourceLoader.exists(main_scene):
-		log_msg("ERROR: ResourceLoader says the scene does not exist:")
+		log_msg("ERROR: ResourceLoader cannot find:")
 		log_msg(main_scene)
-
 		reset_launcher_state()
 		return
 
-	log_msg("Scene exists in mounted PCK.")
+	log_msg("SUCCESS: Scene exists.")
 
-	# Load it explicitly so we can report a useful error
-	# instead of only getting ERR_CANT_OPEN from change_scene.
 	var packed_scene = ResourceLoader.load(main_scene)
 
 	if packed_scene == null:
-		log_msg("ERROR: Scene exists but could not be loaded:")
+		log_msg("ERROR: Scene exists but could not be loaded.")
 		log_msg(main_scene)
-
 		reset_launcher_state()
 		return
 
 	if not packed_scene is PackedScene:
-		log_msg("ERROR: Detected file is not a PackedScene:")
+		log_msg("ERROR: Resource is not a PackedScene.")
 		log_msg(main_scene)
-
 		reset_launcher_state()
 		return
 
 	var scene = packed_scene as PackedScene
 
 	if not scene.can_instantiate():
-		log_msg("ERROR: PackedScene cannot be instantiated:")
+		log_msg("ERROR: PackedScene cannot be instantiated.")
 		log_msg(main_scene)
-
 		reset_launcher_state()
 		return
 
-	log_msg("SUCCESS: Main scene loaded.")
+	log_msg("SUCCESS: Scene loaded and can be instantiated.")
 	log_msg("Starting game...")
 
 	var err = get_tree().change_scene_to_packed(scene)
 
 	if err != OK:
 		log_msg(
-			"ERROR: Could not change to game scene. Error code: "
+			"ERROR: Scene change failed. Error code: "
 			+ str(err)
 		)
 		reset_launcher_state()
@@ -193,89 +180,41 @@ func _on_play_pressed(pck_name: String) -> void:
 
 
 func find_game_main_scene() -> String:
-	log_msg("Searching for game's main scene...")
-
-	# ---------------------------------------------------------
-	# METHOD 1:
-	# Read the game's own project.godot if it was included
-	# in the exported PCK.
-	# ---------------------------------------------------------
-
-	var project_config = ConfigFile.new()
-	var project_error = project_config.load("res://project.godot")
-
-	if project_error == OK:
-		var configured_scene = project_config.get_value(
-			"application",
-			"run/main_scene",
-			""
-		)
-
-		if configured_scene is String and configured_scene != "":
-			log_msg(
-				"Found main scene in game's project.godot: "
-				+ configured_scene
-			)
-
-			if ResourceLoader.exists(configured_scene):
-				return configured_scene
-
-			log_msg(
-				"WARNING: project.godot specified a scene that "
-				+ "could not be loaded: "
-				+ configured_scene
-			)
-	else:
-		log_msg("Game project.godot was not available.")
-
-
-	# ---------------------------------------------------------
-	# METHOD 2:
-	# Search the mounted PCK recursively for Main.tscn.
-	#
-	# This handles your current game:
-	#
-	# res://scenes/Main.tscn
-	#
-	# and also things like:
-	#
-	# res://Main.tscn
-	# res://game/Main.tscn
-	# res://Scenes/main.tscn
-	# ---------------------------------------------------------
+	log_msg("Searching exported PCK for scenes...")
 
 	var all_scenes: Array[String] = []
 
-	collect_tscn_files("res://", all_scenes)
+	collect_resource_scenes("res://", all_scenes)
 
 	log_msg(
-		"Found "
+		"ResourceLoader found "
 		+ str(all_scenes.size())
-		+ " .tscn files while searching."
+		+ " scene resources."
 	)
 
 	if all_scenes.is_empty():
+		log_msg("No scene resources were found in the PCK.")
 		return ""
 
 
-	# Normalize and sort so the result is deterministic.
-	all_scenes.sort_custom(
-		func(a: String, b: String) -> bool:
-			return a.to_lower() < b.to_lower()
-	)
+	# ---------------------------------------------------------
+	# Show everything we found in the debug log.
+	# ---------------------------------------------------------
+
+	for scene_path in all_scenes:
+		log_msg("  SCENE: " + scene_path)
 
 
 	# ---------------------------------------------------------
 	# Priority 1:
-	# Exact filename "main.tscn" / "Main.tscn"
+	# Exact filename Main.tscn
+	# Case-insensitive.
 	# ---------------------------------------------------------
 
 	for scene_path in all_scenes:
-		var file_name = scene_path.get_file().to_lower()
-
-		if file_name == "main.tscn":
+		if scene_path.get_file().to_lower() == "main.tscn":
 			log_msg(
-				"Auto-detected Main.tscn: "
+				"Selected Main.tscn: "
 				+ scene_path
 			)
 
@@ -284,15 +223,13 @@ func find_game_main_scene() -> String:
 
 	# ---------------------------------------------------------
 	# Priority 2:
-	# Anything named MainScene.tscn
+	# MainScene.tscn
 	# ---------------------------------------------------------
 
 	for scene_path in all_scenes:
-		var file_name = scene_path.get_file().to_lower()
-
-		if file_name == "mainscene.tscn":
+		if scene_path.get_file().to_lower() == "mainscene.tscn":
 			log_msg(
-				"Auto-detected MainScene.tscn: "
+				"Selected MainScene.tscn: "
 				+ scene_path
 			)
 
@@ -301,15 +238,13 @@ func find_game_main_scene() -> String:
 
 	# ---------------------------------------------------------
 	# Priority 3:
-	# Anything named Start.tscn
+	# Start.tscn
 	# ---------------------------------------------------------
 
 	for scene_path in all_scenes:
-		var file_name = scene_path.get_file().to_lower()
-
-		if file_name == "start.tscn":
+		if scene_path.get_file().to_lower() == "start.tscn":
 			log_msg(
-				"Auto-detected Start.tscn: "
+				"Selected Start.tscn: "
 				+ scene_path
 			)
 
@@ -318,9 +253,22 @@ func find_game_main_scene() -> String:
 
 	# ---------------------------------------------------------
 	# Priority 4:
-	# A root-level TSCN.
-	#
-	# We avoid launcher.tscn because that's the player itself.
+	# Game.tscn
+	# ---------------------------------------------------------
+
+	for scene_path in all_scenes:
+		if scene_path.get_file().to_lower() == "game.tscn":
+			log_msg(
+				"Selected Game.tscn: "
+				+ scene_path
+			)
+
+			return scene_path
+
+
+	# ---------------------------------------------------------
+	# Priority 5:
+	# Root-level scene.
 	# ---------------------------------------------------------
 
 	for scene_path in all_scenes:
@@ -329,52 +277,77 @@ func find_game_main_scene() -> String:
 		if "/" not in relative_path:
 			if scene_path.get_file().to_lower() != "launcher.tscn":
 				log_msg(
-					"Using root-level scene as fallback: "
+					"Using root-level scene: "
 					+ scene_path
 				)
 
 				return scene_path
 
 
-	log_msg("No suitable scene found.")
+	# ---------------------------------------------------------
+	# Final fallback:
+	# Just use the first scene we found.
+	# ---------------------------------------------------------
 
-	return ""
+	log_msg(
+		"No conventional main scene name found."
+	)
+
+	log_msg(
+		"Using first discovered scene: "
+		+ all_scenes[0]
+	)
+
+	return all_scenes[0]
 
 
-func collect_tscn_files(folder_path: String, results: Array[String]) -> void:
-	var dir = DirAccess.open(folder_path)
+func collect_resource_scenes(
+	folder_path: String,
+	results: Array[String]
+) -> void:
 
-	if dir == null:
-		return
+	var entries = ResourceLoader.list_directory(folder_path)
 
-	var files = dir.get_files()
+	for entry in entries:
 
-	for file_name in files:
-		if file_name.get_extension().to_lower() == "tscn":
-			var full_path = folder_path.path_join(file_name)
+		# ResourceLoader uses a trailing slash to identify directories.
+		if entry.ends_with("/"):
+			var directory_name = entry.trim_suffix("/")
 
-			if not full_path.to_lower().contains(
-				"/_hollow/"
-			):
-				results.append(full_path)
+			# Don't descend into the player's own namespace.
+			if directory_name == "_hollow":
+				continue
 
-	var directories = dir.get_directories()
+			var child_path = folder_path.path_join(
+				directory_name
+			)
 
-	for directory_name in directories:
-		# Ignore hidden/internal Godot directories.
-		if directory_name.begins_with("."):
-			continue
+			collect_resource_scenes(
+				child_path,
+				results
+			)
 
-		var child_path = folder_path.path_join(directory_name)
+		else:
+			var lower_name = entry.to_lower()
 
-		collect_tscn_files(child_path, results)
+			# ResourceLoader returns original editor-visible
+			# filenames, even when export converted them.
+			if lower_name.ends_with(".tscn"):
+				var scene_path = folder_path.path_join(entry)
+
+				if not scene_path.to_lower().contains(
+					"/_hollow/"
+				):
+					results.append(scene_path)
 
 
 func manage_saves(next_game: String) -> void:
 	var dir = DirAccess.open("user://")
 
 	if dir == null:
-		log_msg("WARNING: Could not open user:// for save management.")
+		log_msg(
+			"WARNING: Could not open user:// for save management."
+		)
 		return
 
 	# ---------------------------------------------------------
@@ -382,14 +355,19 @@ func manage_saves(next_game: String) -> void:
 	# ---------------------------------------------------------
 
 	if FileAccess.file_exists(LAST_PLAYED_FILE):
+
 		var last_game = FileAccess.get_file_as_string(
 			LAST_PLAYED_FILE
 		).strip_edges()
 
 		if last_game != "":
-			var backup_path = SAVES_DIR.path_join(last_game)
+			var backup_path = SAVES_DIR.path_join(
+				last_game
+			)
 
-			if not DirAccess.dir_exists_absolute(backup_path):
+			if not DirAccess.dir_exists_absolute(
+				backup_path
+			):
 				DirAccess.make_dir_recursive_absolute(
 					backup_path
 				)
@@ -398,14 +376,20 @@ func manage_saves(next_game: String) -> void:
 			var current_dirs = dir.get_directories()
 
 			for file_name in current_files:
+
 				if file_name in SYSTEM_FILES:
 					continue
 
 				if file_name.get_extension().to_lower() == "pck":
 					continue
 
-				var source = "user://".path_join(file_name)
-				var destination = backup_path.path_join(file_name)
+				var source = "user://".path_join(
+					file_name
+				)
+
+				var destination = backup_path.path_join(
+					file_name
+				)
 
 				var error = DirAccess.rename_absolute(
 					source,
@@ -423,10 +407,14 @@ func manage_saves(next_game: String) -> void:
 					)
 
 			for directory_name in current_dirs:
+
 				if directory_name in SYSTEM_FILES:
 					continue
 
-				var source = "user://".path_join(directory_name)
+				var source = "user://".path_join(
+					directory_name
+				)
+
 				var destination = backup_path.path_join(
 					directory_name
 				)
@@ -451,18 +439,32 @@ func manage_saves(next_game: String) -> void:
 	# RESTORE SELECTED GAME
 	# ---------------------------------------------------------
 
-	var restore_path = SAVES_DIR.path_join(next_game)
+	var restore_path = SAVES_DIR.path_join(
+		next_game
+	)
 
-	if DirAccess.dir_exists_absolute(restore_path):
-		var restore_dir = DirAccess.open(restore_path)
+	if DirAccess.dir_exists_absolute(
+		restore_path
+	):
+
+		var restore_dir = DirAccess.open(
+			restore_path
+		)
 
 		if restore_dir:
+
 			var restore_files = restore_dir.get_files()
 			var restore_dirs = restore_dir.get_directories()
 
 			for file_name in restore_files:
-				var source = restore_path.path_join(file_name)
-				var destination = "user://".path_join(file_name)
+
+				var source = restore_path.path_join(
+					file_name
+				)
+
+				var destination = "user://".path_join(
+					file_name
+				)
 
 				var error = DirAccess.rename_absolute(
 					source,
@@ -480,9 +482,11 @@ func manage_saves(next_game: String) -> void:
 					)
 
 			for directory_name in restore_dirs:
+
 				var source = restore_path.path_join(
 					directory_name
 				)
+
 				var destination = "user://".path_join(
 					directory_name
 				)
