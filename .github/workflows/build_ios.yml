@@ -23,18 +23,19 @@ jobs:
       - name: Verify Hollow Player Project
         run: |
           cd "$GITHUB_WORKSPACE/_hollow"
+
           echo "Current directory:"
           pwd
-          echo
+
           echo "Project files:"
           ls -la
-          echo
-          echo "Checking required files:"
+
           test -f project.godot
           test -f launcher.tscn
           test -f launcher.gd
           test -f export_presets.cfg
           test -f icon.svg
+
           echo "All required files found."
 
       - name: Import Godot Project
@@ -42,9 +43,10 @@ jobs:
           cd "$GITHUB_WORKSPACE/_hollow"
           godot --headless --editor --quit
 
-      - name: Export Xcode Project from Godot
+      - name: Export Xcode Project
         run: |
           cd "$GITHUB_WORKSPACE/_hollow"
+
           mkdir -p "$GITHUB_WORKSPACE/build/ios"
 
           godot --headless --verbose \
@@ -53,11 +55,7 @@ jobs:
 
       - name: Verify Xcode Project
         run: |
-          echo "Export directory:"
-          ls -la "$GITHUB_WORKSPACE/build/ios"
-
           test -d "$GITHUB_WORKSPACE/build/ios/game.xcodeproj"
-
           echo "Xcode project successfully created."
 
       - name: Build Xcode Archive
@@ -77,7 +75,7 @@ jobs:
             CODE_SIGN_ENTITLEMENTS="" \
             OTHER_CODE_SIGN_FLAGS=""
 
-      - name: Package into IPA
+      - name: Package IPA
         run: |
           mkdir -p "$GITHUB_WORKSPACE/Payload"
 
@@ -88,7 +86,7 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           zip -r game.ipa Payload
 
-      - name: Upload IPA Artifact
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: iOS-IPA
