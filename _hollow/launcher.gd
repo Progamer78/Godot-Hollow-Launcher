@@ -15,6 +15,35 @@ const SYSTEM_FILES := [
 	"debug_log.txt"
 ]
 
+const AUTOLOAD_SEARCH_PATHS := [
+	"res://scripts/autoload",
+	"res://autoload",
+	"res://scripts/singletons",
+	"res://singletons",
+	"res://scripts/globals",
+	"res://scripts",
+	"res://"
+]
+
+const AUTOLOAD_PRIORITY := [
+	"GameData",
+	"Global",
+	"Globals",
+	"GameState",
+	"RunState",
+	"MetaState",
+	"PlayerData",
+	"SaveData",
+	"Settings",
+	"DialogueManager",
+	"DialogManager",
+	"MusicManager",
+	"AudioManager",
+	"SoundManager",
+	"Sfx",
+	"SaveManager"
+]
+
 var launch_in_progress := false
 var game_buttons: Array[Button] = []
 var loaded_game_autoloads: Array[Node] = []
@@ -180,16 +209,16 @@ func get_pck_settings() -> Dictionary:
 		var file := FileAccess.open("res://project.binary", FileAccess.READ)
 		if file:
 			var magic := file.get_32()
-			if magic == 0x43464745: # 'ECFG'
-				var _version := file.get_32()
-				var dict = file.get_var()
-				if dict is Dictionary:
-					for key in dict.keys():
-						var val = dict[key]
-						if typeof(val) == TYPE_DICTIONARY and val.has("value"):
-							settings[key] = val["value"]
-						else:
-							settings[key] = val
+			if magic == 0x43464745 or magic == 0x47464345:
+				var count := file.get_32()
+				if count > 0 and count < 65536:
+					for i in range(count):
+						if file.get_position() >= file.get_length():
+							break
+						var key = file.get_var()
+						var val = file.get_var()
+						if key != null and val != null:
+							settings[String(key)] = val
 			file.close()
 
 	return settings
@@ -238,8 +267,78 @@ func setup_game_autoloads(settings: Dictionary) -> bool:
 			load_autoload_entry(entry["name"], entry["path"], entry["is_singleton"])
 		return not loaded_game_autoloads.is_empty()
 
-	log_msg("No autoloads found in configuration.")
-	return false
+	log_msg("Searching for autoload resources via fallback discovery...")
+	var candidates: Array[Dictionary] = []
+
+	for folder in AUTOLOAD_SEARCH_PATHS:
+		if not ResourceLoader.exists(folder):
+			continue
+		collect_autoload_resources(folder, candidates)
+
+	if candidates.is_empty():
+		return false
+
+	candidates.sort_custom(
+		func(a: Dictionary, b: Dictionary) -> bool:
+			var a_priority := autoload_priority(String(a["name"]))
+			var b_priority := autoload_priority(String(b["name"]))
+			if a_priority != b_priority:
+				return a_priority < b_priority
+			return String(a["name"]).to_lower() < String(b["name"]).to_lower()
+	)
+
+	for candidate in candidates:
+		load_autoload_entry(candidate["name"], candidate["path"], true)
+
+	return not loaded_game_autoloads.is_empty()
+
+func collect_autoload_resources(folder_path: String, results: Array[Dictionary]) -> void:
+	var entries := ResourceLoader.list_directory(folder_path)
+	for entry in entries:
+		if entry.ends_with("/"):
+			var child_name := entry.trim_suffix("/")
+			if child_name == "_hollow" or child_name == "scenes" or child_name == "ui":
+				continue
+			collect_autoload_resources(folder_path.path_join(child_name), results)
+			continue
+
+		var lower := entry.to_lower()
+		var valid_script := lower.ends_with(".gd") or lower.ends_with(".gdc") or lower.ends_with(".gd.remap")
+		var valid_scene := lower.ends_with(".tscn") or lower.ends_with(".scn") or lower.ends_with(".tscn.remap")
+
+		if not (valid_script or valid_scene):
+			continue
+
+		var clean_name := entry.get_file()
+		if clean_name.ends_with(".remap"):
+			clean_name = clean_name.trim_suffix(".remap")
+		var base_name := clean_name.get_basename()
+
+		if base_name == "" or base_name == "launcher":
+			continue
+
+		var path := folder_path.path_join(entry)
+		if path.ends_with(".remap"):
+			path = path.trim_suffix(".remap")
+
+		var already_exists := false
+		for r in results:
+			if r["name"] == base_name:
+				already_exists = true
+				break
+
+		if not already_exists:
+			results.append({
+				"name": base_name,
+				"path": path
+			})
+
+func autoload_priority(name: String) -> int:
+	var lower := name.to_lower()
+	for i in range(AUTOLOAD_PRIORITY.size()):
+		if lower == String(AUTOLOAD_PRIORITY[i]).to_lower():
+			return i
+	return 1000
 
 func load_autoload_entry(autoload_name: String, path: String, is_singleton: bool) -> void:
 	if not is_singleton:
@@ -249,32 +348,32 @@ func load_autoload_entry(autoload_name: String, path: String, is_singleton: bool
 		log_msg("Autoload already exists: " + autoload_name)
 		return
 
-	log_msg("Loading autoload: " + autoload_name + " -> " + path)
-	var ext := path.get_extension().to_lower()
+	var clean_path := path
+	if clean_path.ends_with(".remap"):
+		clean_path = clean_path.trim_suffix(".remap")
 
-	if ext == "gd" or ext == "gdc" or path.ends_with(".remap"):
-		var script = ResourceLoader.load(path)
-		if script is Script:
-			var instance = script.new()
+	log_msg("Loading autoload: " + autoload_name + " -> " + clean_path)
+
+	if ResourceLoader.exists(clean_path):
+		var res = ResourceLoader.load(clean_path)
+		if res is Script:
+			var instance = res.new()
 			if instance is Node:
 				instance.name = autoload_name
 				get_tree().root.add_child(instance)
 				loaded_game_autoloads.append(instance)
-				log_msg("  Autoload started: " + autoload_name)
-		return
-
-	if ext == "tscn" or ext == "scn":
-		var resource = ResourceLoader.load(path)
-		if resource is PackedScene:
-			var node := resource.instantiate()
+				log_msg("  Autoload script started: " + autoload_name)
+				return
+		elif res is PackedScene:
+			var node := res.instantiate()
 			if node != null:
 				node.name = autoload_name
 				get_tree().root.add_child(node)
 				loaded_game_autoloads.append(node)
 				log_msg("  Autoload scene started: " + autoload_name)
-		return
+				return
 
-	log_msg("WARNING: Unsupported autoload type: " + path)
+	log_msg("WARNING: Failed to load autoload: " + clean_path)
 
 func clear_previous_game_autoloads() -> void:
 	for node in loaded_game_autoloads:
@@ -299,6 +398,11 @@ func find_game_main_scene(settings: Dictionary) -> String:
 
 	for scene_path in scenes:
 		var lower_name := scene_path.get_file().to_lower()
+		if lower_name == "main.tscn":
+			return scene_path
+
+	for scene_path in scenes:
+		var lower_name := scene_path.get_file().to_lower()
 		if not ("debug" in lower_name or "end" in lower_name or "test" in lower_name):
 			return scene_path
 
@@ -319,7 +423,7 @@ func collect_scene_resources(folder_path: String, results: Array[String]) -> voi
 			var path := folder_path.path_join(entry)
 			if path.ends_with(".remap"):
 				path = path.trim_suffix(".remap")
-			if not "/_hollow/" in path.to_lower():
+			if not "/_hollow/" in path.to_lower() and path != "res://launcher.tscn":
 				results.append(path)
 
 func manage_saves(next_game: String) -> void:
