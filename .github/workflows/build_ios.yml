@@ -20,10 +20,16 @@ jobs:
         use-dotnet: false
         include-templates: true
 
+    - name: Setup Dummy Icon & Import Assets
+      run: |
+        curl -sL -o icon.png https://raw.githubusercontent.com/godotengine/godot/master/icon.png
+        # Run Godot headless once to force it to import the new icon.png
+        godot --headless --editor --quit || true
+
     - name: Export Xcode Project from Godot
       run: |
         mkdir -p build/ios
-        godot --headless --export-release "iOS" build/ios/game.xcodeproj
+        godot --headless --verbose --export-release "iOS" build/ios/game.xcodeproj
 
     - name: Build Xcode Archive (Unsigned)
       run: |
