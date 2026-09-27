@@ -740,21 +740,21 @@ func load_autoload_entry(
 			)
 			return
 
-		var instance = script.new()
-
+		var base_type = script.get_instance_base_type()
+		var instance = ClassDB.instantiate(base_type)
+		
 		if instance == null or not instance is Node:
 			log_msg(
-				"-> ERROR: Script execution blocked. Object does not inherit Node: "
+				"-> ERROR: Base C++ class '" + str(base_type) + "' does not inherit Node: " 
 				+ clean_path
 			)
 			return
 
 		var node := instance as Node
-
 		node.name = autoload_name
+		node.set_script(script)
 
 		get_tree().root.add_child(node)
-
 		loaded_game_autoloads.append(node)
 
 		log_msg(
