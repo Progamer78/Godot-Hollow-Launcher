@@ -63,24 +63,16 @@ func _ready() -> void:
 	build_ui()
 
 func build_ui() -> void:
-	for child in get_children():
-		child.queue_free()
-
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-
 	var bg := ColorRect.new()
 	bg.color = Color(0.12, 0.12, 0.14, 1.0)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.set_anchors_preset(PRESET_FULL_RECT)
 	add_child(bg)
 
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(center)
-
 	ui_container = VBoxContainer.new()
-	ui_container.custom_minimum_size = Vector2(400, 0)
-	ui_container.add_theme_constant_override("separation", 12)
-	center.add_child(ui_container)
+	ui_container.set_anchors_preset(PRESET_CENTER)
+	ui_container.alignment = BoxContainer.ALIGNMENT_CENTER
+	ui_container.add_theme_constant_override("separation", 16)
+	add_child(ui_container)
 
 	refresh_ui_list()
 
@@ -99,11 +91,9 @@ func refresh_ui_list() -> void:
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ui_container.add_child(subtitle)
 
-	var path_info := Label.new()
-	path_info.text = "Storage Path: " + OS.get_user_data_dir()
-	path_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	path_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	ui_container.add_child(path_info)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 10)
+	ui_container.add_child(spacer)
 
 	var dir := DirAccess.open("user://")
 	var pck_found := false
@@ -119,20 +109,24 @@ func refresh_ui_list() -> void:
 			pck_found = true
 			var btn := Button.new()
 			btn.text = "Play: " + file_name
-			btn.custom_minimum_size = Vector2(360, 56)
+			btn.custom_minimum_size = Vector2(360, 60)
 			btn.pressed.connect(_on_play_pressed.bind(file_name))
 			ui_container.add_child(btn)
 			game_buttons.append(btn)
 
 	if not pck_found:
 		var empty_label := Label.new()
-		empty_label.text = "No .pck files detected.\nPlace your game .pck into the app folder via Files."
+		empty_label.text = "No .pck files detected.\nAdd your game .pck via the iOS Files app."
 		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		ui_container.add_child(empty_label)
 
+	var spacer2 := Control.new()
+	spacer2.custom_minimum_size = Vector2(0, 10)
+	ui_container.add_child(spacer2)
+
 	var refresh_btn := Button.new()
 	refresh_btn.text = "Refresh File List"
-	refresh_btn.custom_minimum_size = Vector2(360, 44)
+	refresh_btn.custom_minimum_size = Vector2(360, 50)
 	refresh_btn.pressed.connect(refresh_ui_list)
 	ui_container.add_child(refresh_btn)
 
