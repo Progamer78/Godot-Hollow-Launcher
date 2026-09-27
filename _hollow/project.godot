@@ -3,6 +3,7 @@ config_version=5
 [application]
 
 config/name="Hollow Godot Player"
+config/icon="res://icon.svg"
 run/main_scene="res://launcher.tscn"
 
 [display]
