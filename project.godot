@@ -1,9 +1,16 @@
 config_version=5
 
 [application]
+
 config/name="Hollow Godot Player"
-run/main_scene="res://_hollow/launcher.tscn"
+run/main_scene="res://launcher.tscn"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
 
 [rendering]
+
 renderer/rendering_method="mobile"
-textures/vram_compression/import_etc2_astc=true
