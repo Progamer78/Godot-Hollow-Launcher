@@ -237,6 +237,13 @@ func _on_play_pressed(pck_name: String) -> void:
 
 
 	# --------------------------------------------------------
+	# INJECT GLOBAL CLASSES
+	# --------------------------------------------------------
+
+	inject_global_classes()
+
+
+	# --------------------------------------------------------
 	# READ GAME CONFIGURATION
 	# --------------------------------------------------------
 
@@ -380,6 +387,37 @@ func _on_play_pressed(pck_name: String) -> void:
 	log_msg("========================================")
 	log_msg("--- HANDOFF COMPLETE ---")
 	log_msg("========================================")
+
+
+# ============================================================
+# INJECT GLOBAL CLASSES
+# ============================================================
+
+func inject_global_classes() -> void:
+	var cache_path := "res://.godot/global_script_class_cache.cfg"
+	
+	if FileAccess.file_exists(cache_path):
+		log_msg("-> Parsing global script class cache from PCK...")
+		var cache := ConfigFile.new()
+		
+		if cache.load(cache_path) == OK:
+			var pck_classes = cache.get_value("", "list", [])
+			
+			if typeof(pck_classes) == TYPE_ARRAY:
+				var host_classes = ProjectSettings.get_setting("_global_script_classes", [])
+				
+				if typeof(host_classes) != TYPE_ARRAY:
+					host_classes = []
+					
+				for c in pck_classes:
+					host_classes.append(c)
+					
+				ProjectSettings.set_setting("_global_script_classes", host_classes)
+				log_msg("-> Injected " + str(pck_classes.size()) + " global classes to satisfy script dependencies.")
+		else:
+			log_msg("-> ERROR: Found class cache but failed to parse it.")
+	else:
+		log_msg("-> No global script class cache detected in PCK.")
 
 
 # ============================================================
@@ -711,6 +749,12 @@ func load_autoload_entry(
 	if clean_path.ends_with(".remap"):
 		clean_path = clean_path.trim_suffix(".remap")
 
+	# Override .gd extension in dynamically mounted environments
+	if clean_path.ends_with(".gd"):
+		var gdc_path = clean_path.trim_suffix(".gd") + ".gdc"
+		if FileAccess.file_exists(gdc_path):
+			clean_path = gdc_path
+
 
 	if not ResourceLoader.exists(clean_path):
 		log_msg(
@@ -741,26 +785,29 @@ func load_autoload_entry(
 			return
 
 		var base_type = script.get_instance_base_type()
+		
+		if base_type == "" or not ClassDB.can_instantiate(base_type):
+			base_type = "Node"
+			
 		var instance = ClassDB.instantiate(base_type)
 		
-		if instance == null or not instance is Node:
+		if instance != null and instance is Node:
+			instance.name = autoload_name
+			get_tree().root.add_child(instance)
+			
+			# Attach script after node enters scene tree to allow cross-singleton _init() calls
+			instance.set_script(script)
+			
+			loaded_game_autoloads.append(instance)
 			log_msg(
-				"-> ERROR: Base C++ class '" + str(base_type) + "' does not inherit Node: " 
+				"-> Active Singleton Generated: [" + autoload_name + "] from " + clean_path
+			)
+		else:
+			log_msg(
+				"-> ERROR: Failed to allocate base C++ object for script: "
 				+ clean_path
 			)
-			return
-
-		var node := instance as Node
-		node.name = autoload_name
-		node.set_script(script)
-
-		get_tree().root.add_child(node)
-		loaded_game_autoloads.append(node)
-
-		log_msg(
-			"-> Active Singleton Generated: [" + autoload_name + "] from " + clean_path
-		)
-
+			
 		return
 
 
