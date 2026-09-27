@@ -2,7 +2,7 @@ name: Export and Build iOS IPA
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
   workflow_dispatch:
 
 jobs:
@@ -10,51 +10,50 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Setup Godot Engine
-      uses: chickensoft-games/setup-godot@v2
-      with:
-        version: '4.7.0'
-        use-dotnet: false
-        include-templates: true
+      - name: Setup Godot Engine
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: "4.7.0"
+          use-dotnet: false
+          include-templates: true
 
-    - name: Generate Dummy Icon & Import Assets
-      run: |
-        python3 -c "import zlib, struct; w, h = 1024, 1024; ihdr = struct.pack('!I4sIIBBBBB', 13, b'IHDR', w, h, 8, 2, 0, 0, 0); comp = zlib.compress(bytes((w * 3 + 1) * h)); idat = struct.pack('!I4s', len(comp), b'IDAT') + comp; iend = struct.pack('!I4s', 0, b'IEND'); f = open('icon.png', 'wb'); f.write(b'\x89PNG\r\n\x1a\n' + ihdr + struct.pack('!I', zlib.crc32(ihdr[4:])) + idat + struct.pack('!I', zlib.crc32(idat[4:])) + iend + struct.pack('!I', zlib.crc32(iend[4:]))); f.close()"
-        godot --headless --editor --quit || true
+      - name: Import Godot Project
+        run: |
+          godot --headless --editor --path "_hollow" --quit
 
-    - name: Export Xcode Project from Godot
-      run: |
-        mkdir -p build/ios
-        godot --headless --verbose --export-release "iOS" build/ios/game.xcodeproj
+      - name: Export Xcode Project from Godot
+        run: |
+          mkdir -p build/ios
+          godot --headless --verbose --path "_hollow" --export-release "iOS" "build/ios/game.xcodeproj"
 
-    - name: Build Xcode Archive (Unsigned)
-      run: |
-        xcodebuild archive \
-          -project "build/ios/game.xcodeproj" \
-          -scheme "game" \
-          -sdk iphoneos \
-          -configuration Release \
-          -archivePath build/ios/game.xcarchive \
-          CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO \
-          CODE_SIGNING_STYLE=Manual \
-          DEVELOPMENT_TEAM="" \
-          PROVISIONING_PROFILE_SPECIFIER="" \
-          CODE_SIGN_ENTITLEMENTS="" \
-          OTHER_CODE_SIGN_FLAGS=""
+      - name: Build Xcode Archive
+        run: |
+          xcodebuild archive \
+            -project "build/ios/game.xcodeproj" \
+            -scheme "game" \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath "build/ios/game.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_STYLE=Manual \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            OTHER_CODE_SIGN_FLAGS=""
 
-    - name: Package into .IPA
-      run: |
-        mkdir -p Payload
-        cp -r build/ios/game.xcarchive/Products/Applications/*.app Payload/
-        zip -r game.ipa Payload
+      - name: Package into IPA
+        run: |
+          mkdir -p Payload
+          cp -r build/ios/game.xcarchive/Products/Applications/*.app Payload/
+          zip -r game.ipa Payload
 
-    - name: Upload IPA Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: iOS-IPA
-        path: game.ipa
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-IPA
+          path: game.ipa
