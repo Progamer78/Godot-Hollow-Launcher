@@ -6,3 +6,4 @@ run/main_scene="res://_hollow/launcher.tscn"
 
 [rendering]
 renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true
