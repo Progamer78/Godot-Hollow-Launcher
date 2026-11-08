@@ -2,8 +2,10 @@
 build/
 artifacts/
 **/.godot/
+**/.import/
 **/__pycache__/
 GodotPlayerReference/
+FullGameReference/
 Goodbye_Eternity-*/
 RecentGithubFail/
 RecentGithubFail2/
