@@ -20,6 +20,11 @@ struct GameScreen: View {
     @State private var selected: ControlButton?
     @State private var controlArea = CGSize.zero
     @State private var needsInitialLayout: Bool
+    @State private var menuOpen = false
+    @State private var menuHeight: CGFloat = 220
+    @AppStorage("playerMenuX") private var menuX = 1.0
+    @AppStorage("playerMenuY") private var menuY = 0.0
+    @GestureState private var menuTranslation = CGSize.zero
 
     init(session: GameSession) {
         self.session = session
@@ -37,23 +42,19 @@ struct GameScreen: View {
                 MouseSurface(mode: profile.mouseMode, sensitivity: profile.mouseSensitivity).ignoresSafeArea()
             }
             if editing { Color.black.opacity(0.18).ignoresSafeArea() }
-            VStack(spacing: 4) {
-                toolbar
-                if editing {
-                    Text("Drag buttons to move them. Tap one to change its label, key or size. Save keeps this game's layout.")
-                        .font(.caption).padding(6).background(Color.black.opacity(0.7)).foregroundColor(.white)
-                }
-                GeometryReader { area in
-                    ZStack {
-                        if showButtons || editing {
-                            ForEach(profile.buttons) { button in
-                                control(button, in: area.size)
-                            }
+            GeometryReader { area in
+                ZStack {
+                    if showButtons || editing {
+                        ForEach(profile.buttons) { button in
+                            control(button, in: area.size)
                         }
                     }
-                    .onAppear { updateArea(area.size) }
-                    .onChange(of: area.size) { updateArea($0) }
+                    if menuOpen || editing { menuPanel(in: area.size) }
+                    menuHandle(in: area.size)
                 }
+                .coordinateSpace(name: "playerControls")
+                .onAppear { updateArea(area.size) }
+                .onChange(of: area.size) { updateArea($0) }
             }.padding(8)
         }
         .sheet(item: $selected) { button in
@@ -70,10 +71,11 @@ struct GameScreen: View {
         .onChange(of: phase) { if $0 != .active { PlayerRuntime.releaseKeys() } }
     }
 
-    private var toolbar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                if editing {
+    private var menuContents: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if editing {
+                Text("Drag buttons to move them. Tap one to change its key, label or size.").font(.caption)
+                HStack(spacing: 14) {
                     Button("Cancel") { cancelEdit() }
                     Button("Add Button") {
                         guard profile.buttons.count < 32 else { return }
@@ -87,14 +89,20 @@ struct GameScreen: View {
                     Button("Save") {
                         if library.saveControls(profile, visible: showButtons, for: session.id) {
                             editing = false
+                            menuOpen = false
                             original = nil
                             PlayerRuntime.setMouseEnabled(profile.mouseEnabled)
                         }
                     }
-                } else {
+                }
+            } else {
+                HStack(spacing: 16) {
                     Button(showButtons ? "Hide Buttons" : "Show Buttons") {
                         PlayerRuntime.releaseKeys()
-                        if library.saveControls(profile, visible: !showButtons, for: session.id) { showButtons.toggle() }
+                        if library.saveControls(profile, visible: !showButtons, for: session.id) {
+                            showButtons.toggle()
+                            menuOpen = false
+                        }
                     }
                     Button(profile.mouseEnabled ? "Mouse: On" : "Mouse: Off") {
                         var updated = profile
@@ -102,33 +110,86 @@ struct GameScreen: View {
                         if library.saveControls(updated, visible: showButtons, for: session.id) {
                             profile = updated
                             PlayerRuntime.setMouseEnabled(profile.mouseEnabled)
+                            menuOpen = false
                         }
                     }
-                    Button("Edit Controls") {
-                        PlayerRuntime.releaseKeys()
-                        PlayerRuntime.setMouseEnabled(false)
-                        original = profile
-                        originalVisibility = showButtons
-                        editing = true
-                    }
-                    if profile.mouseEnabled {
+                }
+                Button("Edit Controls") {
+                    PlayerRuntime.releaseKeys()
+                    PlayerRuntime.setMouseEnabled(false)
+                    original = profile
+                    originalVisibility = showButtons
+                    editing = true
+                }
+                if profile.mouseEnabled {
+                    HStack(spacing: 16) {
                         Button(profile.mouseMode == "trackpad" ? "Trackpad" : "Direct Touch") {
                             var updated = profile
                             updated.mouseMode = updated.mouseMode == "trackpad" ? "direct" : "trackpad"
                             if library.saveControls(updated, visible: showButtons, for: session.id) {
                                 PlayerRuntime.releaseKeys()
                                 profile = updated
+                                menuOpen = false
                             }
                         }
-                        KeySurface(title: "Left Click", key: "Mouse Left").frame(width: 84, height: 44)
-                        KeySurface(title: "Right Click", key: "Mouse Right").frame(width: 88, height: 44)
                         Button("Scroll ↑") { PlayerRuntime.scrollMouse(1) }
                         Button("Scroll ↓") { PlayerRuntime.scrollMouse(-1) }
                     }
+                    HStack(spacing: 12) {
+                        KeySurface(title: "Left Click", key: "Mouse Left").frame(width: 84, height: 44)
+                        KeySurface(title: "Right Click", key: "Mouse Right").frame(width: 88, height: 44)
+                    }
                 }
-            }.padding(8)
+                Text("Drag the ⋯ button to move it. Tap it to close this menu.").font(.caption)
+            }
         }
-        .background(Color.black.opacity(0.75)).foregroundColor(.white).cornerRadius(10)
+        .padding(12).foregroundColor(.white)
+        .background(Color.black.opacity(0.8)).cornerRadius(12)
+    }
+
+    private func menuPoint(in size: CGSize) -> CGPoint {
+        CGPoint(x: min(max(22, 22 + CGFloat(menuX) * max(0, size.width - 44) + menuTranslation.width), max(22, size.width - 22)),
+                y: min(max(22, 22 + CGFloat(menuY) * max(0, size.height - 44) + menuTranslation.height), max(22, size.height - 22)))
+    }
+
+    private func menuHandle(in size: CGSize) -> some View {
+        Button {
+            if !editing { menuOpen.toggle() }
+        } label: {
+            Image(systemName: editing ? "arrow.up.left.and.arrow.down.right" : (menuOpen ? "xmark" : "ellipsis"))
+                .font(.system(size: 18, weight: .semibold)).foregroundColor(.white)
+                .frame(width: 44, height: 44)
+                .background(Color.black.opacity(menuOpen || editing ? 0.65 : 0.25)).clipShape(Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel(editing ? "Move controls menu" : (menuOpen ? "Close controls menu" : "Open controls menu"))
+        .accessibilityHint("Drag to move away from the game's buttons")
+        .simultaneousGesture(DragGesture(minimumDistance: 8, coordinateSpace: .named("playerControls"))
+            .updating($menuTranslation) { value, state, _ in state = value.translation }
+            .onEnded { value in
+                let x = 22 + CGFloat(menuX) * max(0, size.width - 44) + value.translation.width
+                let y = 22 + CGFloat(menuY) * max(0, size.height - 44) + value.translation.height
+                menuX = Double(min(1, max(0, (x - 22) / max(1, size.width - 44))))
+                menuY = Double(min(1, max(0, (y - 22) / max(1, size.height - 44))))
+            })
+        .position(menuPoint(in: size))
+    }
+
+    private func menuPanel(in size: CGSize) -> some View {
+        let point = menuPoint(in: size)
+        let width = min(340, size.width)
+        let height = min(menuHeight, max(44, size.height - 56))
+        let top = point.y + 28 + height <= size.height ? point.y + 28 : point.y - 28 - height
+        return ScrollView {
+            menuContents.background(GeometryReader { measured in
+                Color.clear.preference(key: MenuHeight.self, value: measured.size.height).allowsHitTesting(false)
+            })
+        }
+        .frame(width: width, height: height)
+        .onPreferenceChange(MenuHeight.self) { menuHeight = $0 }
+        .position(x: min(max(width / 2, point.x), max(width / 2, size.width - width / 2)),
+                  y: min(max(height / 2, top + height / 2), max(height / 2, size.height - height / 2)))
     }
 
     @ViewBuilder
@@ -159,6 +220,7 @@ struct GameScreen: View {
         showButtons = originalVisibility
         original = nil
         editing = false
+        menuOpen = false
         PlayerRuntime.setMouseEnabled(profile.mouseEnabled)
     }
 
@@ -174,6 +236,11 @@ struct GameScreen: View {
         profile.buttons = ControlProfile.legacy(directions: session.game.directionKeys, extras: session.game.extraKeys,
                                                areaWidth: Double(max(1, controlArea.width)), areaHeight: Double(max(1, controlArea.height))).buttons
     }
+}
+
+private struct MenuHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 220
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 private struct EditableControl: View {
@@ -192,9 +259,8 @@ private struct EditableControl: View {
         .background(Color.black.opacity(0.75)).foregroundColor(.white)
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.yellow, lineWidth: 2))
         .cornerRadius(10)
-        .position(x: center.x + translation.width, y: center.y + translation.height)
         .onTapGesture(perform: onSelect)
-        .gesture(DragGesture(minimumDistance: 6)
+        .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .named("playerControls"))
             .updating($translation) { value, state, _ in state = value.translation }
             .onEnded { value in
                 onMove(CGPoint(x: min(max(CGFloat(button.width) / 2, center.x + value.translation.width), max(CGFloat(button.width) / 2, area.width - CGFloat(button.width) / 2)),
@@ -202,6 +268,7 @@ private struct EditableControl: View {
             })
         .accessibilityLabel("Edit \(button.label), mapped to \(button.key)")
         .accessibilityAddTraits(.isButton)
+        .position(x: center.x + translation.width, y: center.y + translation.height)
     }
 }
 

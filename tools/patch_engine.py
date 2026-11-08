@@ -4,7 +4,7 @@ import argparse
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH_REVISION = "mouse-controls-v3"
+PATCH_REVISION = "floating-menu-spine-v4"
 
 
 def replace(path, old, new):
@@ -70,7 +70,7 @@ def patch(engine):
 
     renderer = apple / "godot_view_renderer.mm"
     replace(renderer, '#import "godot_view_renderer.h"',
-        '#import "godot_view_renderer.h"\n#import "app_delegate_service.h"\n#import "godot_view_controller.h"')
+        '#import "godot_view_renderer.h"\n#import "app_delegate_service.h"\n#import "godot_view_controller.h"\n#import "PlayerRuntime.h"\nextern BOOL player_main_started;')
     replace(renderer, "@property(assign, nonatomic) BOOL hasFinishedSetup;",
         "@property(assign, nonatomic) BOOL hasFinishedSetup;\n@property(assign, nonatomic) BOOL playerSetupFailed;")
     replace(renderer, "\tif (self.hasFinishedSetup) {", "\tif (self.playerSetupFailed) return YES;\n\tif (self.hasFinishedSetup) {")
@@ -78,10 +78,11 @@ def patch(engine):
         '\tif (Main::setup2() != OK) {\n\t\t[self playerFailed:@"Godot rendering or project setup failed. See player.log, then close and reopen the app."];\n\t\treturn;\n\t}\n'
         "\t// Play occurs after the scene became active; replay initial focus only\n"
         "\t// after audio and rendering subsystems have initialized.\n"
-        "\tOS_AppleEmbedded::get_singleton()->on_focus_in();")
+        "\tOS_AppleEmbedded::get_singleton()->on_focus_in();\n"
+        "\t[PlayerRuntime logRuntimeConfiguration];")
     replace(renderer, "\t\tOS_AppleEmbedded::get_singleton()->start();",
         '\t\tOS_AppleEmbedded::get_singleton()->start();\n'
-        '\t\tif (!OS::get_singleton()->get_main_loop()) [self playerFailed:@"Godot could not start the main scene. See player.log, then close and reopen the app."];')
+        '\t\tif (!player_main_started || !OS::get_singleton()->get_main_loop()) [self playerFailed:[PlayerRuntime launchFailureMessage]];')
     replace(renderer, "- (void)renderOnView:(UIView *)view {",
         "- (void)renderOnView:(UIView *)view {\n\tif (self.playerSetupFailed) return;")
     replace(renderer, "\tOS_AppleEmbedded::get_singleton()->iterate();\n}\n\n@end",
@@ -95,6 +96,13 @@ def patch(engine):
         '\t});\n}\n\n@end')
 
     os_file = apple / "os_apple_embedded.mm"
+    # Main::start returns a status, but upstream's void start() discards it.
+    # Scene loading may fail after creating a main loop, so that pointer alone
+    # cannot establish successful startup (the Goodbye Eternity logs show this).
+    replace(os_file,
+        "void OS_AppleEmbedded::start() {\n\tif (Main::start() == EXIT_SUCCESS) {",
+        "extern BOOL player_main_started;\n\nvoid OS_AppleEmbedded::start() {\n"
+        "\tplayer_main_started = Main::start() == EXIT_SUCCESS;\n\tif (player_main_started) {")
     replace(os_file,
         "String OS_AppleEmbedded::get_user_data_dir(const String &p_user_dir) const {",
         "extern NSString *player_save_path;\n\n"

@@ -1,6 +1,6 @@
 # Native Godot Player for iOS
 
-The player has been built through GitHub Actions, installed on an iPhone, and used to run two independently imported games, as reported by the user. The supplied device logs confirm execution of both games. **The latest mouse, control-editor, and native-extension fallback changes still require a new CI build and iPhone test.**
+The player has been built through GitHub Actions, installed on an iPhone, and used to run independently imported games. The user also reports the mouse/control update working, apart from its intrusive toolbar. **The new floating menu, Spine integration, and startup-failure handling require a new CI build and iPhone test.**
 
 The launcher imports complete PCKs through Files and initializes the selected pack as Godot's **main project**. It does not mount games inside a Godot launcher project. The first adapter uses official Godot **4.7.2-stable**, revision `ed1daf0bf001b61586d9930840f2f1394092c079`.
 
@@ -27,21 +27,33 @@ See [test evidence](tests/results/validation.md), [reference inspection](docs/re
 
 1. Put these project files in a GitHub repository. Do not upload `GodotPlayerReference/`, `.cache/`, credentials, or generated `build/` files. The reference materials remain untouched locally.
 2. Open **Actions → Build native Godot Player → Run workflow**. A push to `main` or `master` also runs it.
-3. The workflow obtains matching official editor/templates, tests two packs, checks out the immutable engine revision, applies the narrow source changes, and builds its ARM64 static library.
+3. Leave **Bundled Spine version** at **4.2** for Goodbye Eternity 0.14.1. The workflow obtains matching official editor/templates, tests two packs, checks out immutable engine/Spine revisions, applies the source changes, and builds its ARM64 static library. The Spine runtime is compiled into the IPA, never loaded from imported games. The `none` option retains a standard build without Spine.
 4. It uses the reference's existing `godot --export-release → xcodebuild archive → Payload ZIP` sequence. The custom runtime replaces only the exported ARM64 library. Exported framework links and Xcode source structure are preserved.
 5. Download `GodotPlayer-build-and-tests`. A successful archive includes `GodotPlayer-unsigned.ipa`, both sample PCKs, and logs.
 
-For the current update, extract `build/checkpoints/GodotPlayer-Mouse-Controls-Update.zip` and upload its `.github`, `ios`, `tools`, and `tests` folders together at the GitHub repository root using **Add file → Upload files**. Include the hidden `.github` folder. Keep the folder paths: the build executes `tools/patch_engine.py`, not a copy at the root. Commit the upload and run the workflow. The patch step should report `mouse-controls-v3`.
+For the current update, extract `build/checkpoints/GodotPlayer-Floating-Menu-Spine-Update.zip` and upload its contents at the GitHub repository root using **Add file → Upload files**. Include the `.github`, `ios`, `tools`, `tests`, `docs`, and `licenses` folders, preserving their paths. The build executes `tools/patch_engine.py`, not a copy at the root. Commit the upload and run the workflow. The patch step should report `floating-menu-spine-v4`.
 
 Sign the new IPA with the same app identifier and sideloading identity as the installed player, then install it as an update. Avoid uninstalling the existing app if you want to retain its library and saves.
 
 ## Mouse and saved controls
 
-While a game is running, tap **Edit Controls**. Drag a button to move it; tap it to change its label, keyboard/mouse input, or size. **Add Button** adds another mapping. **Apply** updates that button in the draft; **Save** stores the entire layout for this game. **Cancel** discards the draft. Normalized positions adapt to screen size, and the previous library format migrates without changing game identities or save folders.
+While a game is running, tap the small **⋯** button to open controls. It starts collapsed, has no permanent bar, and can be dragged away from the game's own buttons; its location persists. Only the button and an explicitly opened panel occupy touch space. The panel does not change the game's rendering area or the control canvas. Toggling mouse/visibility/mode closes it automatically.
 
-Tap **Mouse: Off** to enable the pointer. **Trackpad** uses relative finger movement and a tap for left click. Tap **Trackpad** to switch to **Direct Touch**, where a finger positions the pointer and presses the left button for dragging. Dedicated **Left Click**, **Right Click**, and scroll buttons are also available in the horizontally scrollable toolbar. Hold a click button with one finger while moving with another. Captured mouse games receive relative movement and control whether their cursor is visible. Turn the mouse off to restore native game touch input. Mouse settings and button visibility save per game.
+Choose **Edit Controls**. Drag a button to move it; tap it to change its label, keyboard/mouse input, or size. **Add Button** adds another mapping. **Apply** updates that button in the draft; **Save** stores the entire layout for this game. **Cancel** discards the draft. Existing layouts, game identities, and save folders are preserved.
+
+Tap **Mouse: Off** to enable the pointer. **Trackpad** uses relative finger movement and a tap for left click. Tap **Trackpad** to switch to **Direct Touch**, where a finger positions the pointer and presses the left button for dragging. Dedicated **Left Click**, **Right Click**, and scroll buttons remain available in the expanded panel. Mouse click buttons can also be added to a saved layout. Captured mouse games receive relative movement and control whether their cursor is visible. Turn the mouse off to restore native game touch input. Mouse settings and button visibility save per game.
 
 For Pokémon Battle Advanced, import the original complete `.pck` again, open its details, enable **Try without native extensions**, then press Play. The previous importer rejected the optional `webrtc_native.gdextension` descriptor outright. The new importer records a warning instead. No imported native code is loaded, and the pack stays unchanged. Online WebRTC features are unavailable; a game requiring native classes may still fail. This Pokémon launch path has not yet been tested on an iPhone.
+
+## Goodbye Eternity / Spine
+
+The supplied Goodbye Eternity 0.14.1 packs identify Godot 4.6.1 and contain Spine 4.2 animation data. Both iPhone logs fail on missing Spine classes and the splash scene; both use Compatibility rendering. The 2 GB archive size is not the failure shown in those logs.
+
+The unchanged Windows embedded pack and Mac standalone PCK both start headlessly with zero script errors in the official Spine 4.2-enabled Godot 4.6.1 desktop build. Standard Godot 4.7.2 reproduces the missing-class failure. The player now stages the real official Spine 4.2 C++ module into its Godot 4.7.2 source build. This fixes the missing dependency in source; compilation and actual iPhone execution remain to be verified. Do not expect arbitrary native plugins to work.
+
+The startup check now retains `Main::start()`'s actual result. A failed main scene displays a launch error instead of being mistaken for a running game because a main-loop object exists. New logs also identify the requested renderer and bundled Spine version.
+
+Spine uses a [separate runtime license](https://github.com/EsotericSoftware/spine-runtimes/blob/4.2/LICENSE), not Godot's MIT license. Its integration/distribution terms require appropriate Spine licensing; see the upstream terms before building or distributing a Spine-enabled player. Original notices are preserved in downloaded sources and included in the IPA resources and build artifact. The workflow can select 4.1/4.2/4.3, but the tested game requires **4.2**; later Spine minor versions do not automatically read older exports. Only one Spine minor version is currently bundled in an IPA.
 
 The engine rebuild is necessary: official release templates default to disabling external main-pack overrides, initialize before a game can be selected, and share one Documents save path. It is an application-runtime build, performed once per player version, not once per imported game.
 
@@ -53,6 +65,11 @@ Use Xcode with the iOS SDK and Python 3. Install the **4.7.2 standard editor and
 mkdir -p .cache build/ios
 git clone https://github.com/godotengine/godot.git .cache/godot-source
 git -C .cache/godot-source checkout ed1daf0bf001b61586d9930840f2f1394092c079
+git clone --filter=blob:none --sparse https://github.com/EsotericSoftware/spine-runtimes.git .cache/spine-runtimes
+git -C .cache/spine-runtimes sparse-checkout set spine-godot/spine_godot spine-cpp/spine-cpp
+git -C .cache/spine-runtimes fetch --depth 1 origin 5cb78e77d3711ddcd80c7bd043bb11cf70fcc88c
+git -C .cache/spine-runtimes checkout --detach FETCH_HEAD
+python3 tools/prepare_spine.py .cache/godot-source .cache/spine-runtimes --version 4.2
 python3 tools/desktop_proof.py "$(command -v godot)"
 swiftc -swift-version 5 ios/PCKInspector.swift tests/pck/main.swift -o build/pck-tests
 build/pck-tests build/proof/movement.pck build/proof/counter.pck
@@ -69,7 +86,7 @@ cd .cache/godot-source
 cd ../..
 godot --headless --path bootstrap --editor --import
 godot --headless --path bootstrap --export-release iOS "$PWD/build/ios/player.xcodeproj"
-python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a
+python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a --spine-license build/SPINE-RUNTIMES-LICENSE.txt
 open build/ios/player.xcodeproj
 ```
 

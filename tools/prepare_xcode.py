@@ -7,7 +7,16 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def prepare(export, library):
+def prepare(export, library, spine_license=None):
+    notices = [
+        ("GodotEngineNotices", (ROOT / "licenses/GODOT-LICENSE.txt").read_text(encoding="utf-8") + "\n" +
+         (ROOT / "licenses/GODOT-COPYRIGHT.txt").read_text(encoding="utf-8")),
+    ]
+    if spine_license is not None:
+        license_text = spine_license.read_text(encoding="utf-8")
+        if "Spine Runtimes License Agreement" not in license_text:
+            raise RuntimeError("Missing or invalid Spine runtime license notice.")
+        notices.append(("SpineRuntimeNotices", license_text))
     # The known-working exporter creates this name from player.xcodeproj.
     target = export / "player.xcframework/ios-arm64/libgodot.a"
     if not target.is_file():
@@ -41,10 +50,9 @@ def prepare(export, library):
     # extra Xcode groups or changing engine/framework linker settings.
     strings = export / "player/en.lproj/InfoPlist.strings"
     with strings.open("a", encoding="utf-8") as out:
-        license_text = (ROOT / "licenses/GODOT-LICENSE.txt").read_text(encoding="utf-8")
-        copyright_text = (ROOT / "licenses/GODOT-COPYRIGHT.txt").read_text(encoding="utf-8")
-        escaped = (license_text + "\n" + copyright_text).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-        out.write('\n"GodotEngineNotices" = "' + escaped + '";\n')
+        for key, text in notices:
+            escaped = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+            out.write('\n"' + key + '" = "' + escaped + '";\n')
     print(f"Prepared {export / 'player.xcodeproj'} with {library.name}")
 
 
@@ -52,5 +60,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("export", type=Path)
     parser.add_argument("library", type=Path)
+    parser.add_argument("--spine-license", type=Path)
     args = parser.parse_args()
-    prepare(args.export.resolve(), args.library.resolve())
+    prepare(args.export.resolve(), args.library.resolve(), args.spine_license)

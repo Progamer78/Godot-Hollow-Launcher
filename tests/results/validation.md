@@ -1,5 +1,31 @@
 # Validation recorded November 7, 2026
 
+## Floating menu and Spine update
+
+The user reports the preceding mouse/control update working on iPhone apart from the permanent toolbar. This update replaces it with a 44-point, translucent, movable menu handle, initially collapsed. The settings panel exists only when opened, and toggle changes close it. Gesture handlers attach before positioning so they do not acquire an invisible screen-sized drag region. Opening the panel does not resize the rendering view or saved-control canvas. UI compilation and touch behavior of this change remain untested on iPhone.
+
+Both supplied Goodbye Eternity logs identify Compatibility rendering and missing `SpineSprite`, `SpineAnimation`, `SpineAnimationState`, `SpineTrackEntry`, `SpineSkeleton` and `SpineSkeletonDataResource`, followed by a failed splash scene. The two logs have identical contents. They do not establish a Metal-versus-OpenGL difference or a size-related memory failure.
+
+Inspection read only the archive directory and small skeleton prefixes, without extracting the whole game. Windows: embedded format-3 pack, Godot 4.6.1, 7,329 entries, 2,194,788,562 pack bytes. Mac: standalone format-3 PCK, Godot 4.6.1, 2,194,788,719 bytes. Both contain Spine 4.2 skeletons; samples include 4.2.38, 4.2.39, 4.2.40 and 4.2.43. Neither contains a native library/extension descriptor.
+
+| Current check | Actual result |
+| --- | --- |
+| Standard Godot 4.7.2 + unchanged Windows embedded pack | Exit 1; 22 script errors, 16 missing-Spine-type errors, main scene failed; reproduces iPhone failure |
+| Official Spine 4.2-enabled Godot 4.6.1 + same embedded pack | Headless startup, 90 frames, exit 0, zero script errors, no main-scene failure |
+| Same Spine-enabled desktop engine + original Mac standalone PCK | Headless startup, 90 frames, exit 0, zero script errors, no main-scene failure |
+| Actual selected Spine source staging | Pinned revision verified; 100 C++ source files staged into engine modules; normal Godot registration/include layout and exact license preserved |
+| Python tests | 4 passed: source patching/start-result guards, export preparation/Spine notice, module staging/version guards, no-Spine build |
+| Workflow | Parsed YAML and embedded Python; default Spine 4.2, immutable version-specific source commits, optional no-Spine build, artifact license included |
+| Startup failure handling | Source captures actual Main::start result rather than assuming a created main-loop object means success; fixture guards passed; native alert not device-tested |
+| New iOS compilation/IPA | Not performed/produced from Windows |
+| New floating-menu touch behavior / Goodbye Eternity iPhone gameplay | Not tested |
+
+The desktop Spine-enabled runs still logged restricted Windows certificate-store access and shutdown resource leaks. These tests establish startup/resource/script compatibility in that official 4.6.1 desktop engine; they do not establish full gameplay, graphics output, device memory use, or compilation of the new 4.7.2 iOS module. The Windows game EXE was read as a pack container, not executed. Mac assets and original game files were not modified.
+
+The official Spine source is 4.2 revision `5cb78e77d3711ddcd80c7bd043bb11cf70fcc88c`. The desktop test engine came from the official Spine download linked by its runtime documentation; URL/checksum and concise structured results are in `eternity-startup.json`. Full logs are local in `build/eternity-proof/`, excluded from source ZIPs. Native import loading remains disabled; Spine is a trusted, statically compiled dependency in the IPA. Its separate license is embedded by export preparation and included in the build artifact.
+
+The evidence below records the earlier implementation and tests; pending mouse/editor entries refer to their status before the user's latest device report.
+
 The user reports successfully building and installing the preceding player and running two independently imported games on an actual iPhone. The supplied `Errors/(Smell)player.log` and `Errors/(Physician)player.log` confirm custom Godot 4.7.2 ARM64 execution on A17 Pro, using Compatibility and Mobile renderers respectively. This is real multi-game player evidence. It is user-reported device testing, not an automated device test performed here.
 
 ## Current mouse/control update

@@ -1,0 +1,108 @@
+{
+  "windows_embedded_pack": {
+    "engine": [
+      4,
+      6,
+      1
+    ],
+    "format": 3,
+    "files": 7329,
+    "embedded_offset": 67443712,
+    "pack_bytes": 2194788562,
+    "spine_asset_versions": [
+      "4.2.40",
+      "4.2.43",
+      "4.2.43",
+      "4.2.43",
+      "4.2.43",
+      "4.2.43",
+      "4.2.38",
+      "4.2.43",
+      "4.2.43",
+      "4.2.43"
+    ],
+    "native_libraries": []
+  },
+  "windows_desktop_comparison": {
+    "standard-4.7.2": {
+      "exit_code": 1,
+      "seconds": 3.94,
+      "script_errors": 22,
+      "missing_spine_types": 16,
+      "failed_main_scene": true,
+      "log_bytes": 193616
+    },
+    "spine-4.2-godot-4.6.1": {
+      "exit_code": 0,
+      "seconds": 5.47,
+      "script_errors": 0,
+      "missing_spine_types": 0,
+      "failed_main_scene": false,
+      "log_bytes": 136168
+    }
+  },
+  "mac_standalone_pack": {
+    "pack": "Goodbye Eternity.pck",
+    "byte_count": 2194788719,
+    "format": 3,
+    "engine": [
+      4,
+      6,
+      1
+    ],
+    "spine_versions": [
+      "4.2.38",
+      "4.2.39",
+      "4.2.40",
+      "4.2.43"
+    ],
+    "native_libraries": [],
+    "desktop_engine": "official Spine 4.2-enabled Godot 4.6.1",
+    "headless_exit_code": 0,
+    "seconds": 5.83,
+    "script_errors": 0,
+    "failed_main_scene": false,
+    "full_gameplay_tested": false,
+    "ios_tested": false,
+    "log_bytes": 136094
+  },
+  "official_desktop_download": {
+    "url": "https://spine-godot.s3.eu-central-1.amazonaws.com/4.2/4.6.1-stable/godot-editor-windows.zip",
+    "sha256": "45e58c9f855907938f89664a6b836eb1d8508d37c2216830f11d750fb133b0e9"
+  },
+  "module_source": {
+    "version": "4.2",
+    "revision": "5cb78e77d3711ddcd80c7bd043bb11cf70fcc88c",
+    "linkage": "static built-in module",
+    "classes": [
+      "SpineSprite",
+      "SpineAnimation",
+      "SpineAnimationState",
+      "SpineTrackEntry",
+      "SpineSkeleton",
+      "SpineSkeletonDataResource"
+    ]
+  },
+  "device_logs": [
+    {
+      "file": "(GoodbyeEternity)player.log",
+      "sha256": "76b241f58a14ac43c63c851e23b6a6526451aa88ea8c4856084454616f166d91",
+      "renderer": "Compatibility",
+      "missing_spine_types": 16,
+      "failed_main_scene": true
+    },
+    {
+      "file": "(GoodbyeEternity2)player.log",
+      "sha256": "76b241f58a14ac43c63c851e23b6a6526451aa88ea8c4856084454616f166d91",
+      "renderer": "Compatibility",
+      "missing_spine_types": 16,
+      "failed_main_scene": true
+    }
+  ],
+  "limits": [
+    "Desktop comparison used official standard Godot 4.7.2 and official Spine 4.2-enabled Godot 4.6.1",
+    "No updated Godot 4.7.2 iOS compilation or device test was performed",
+    "Full gameplay was not tested",
+    "Spine-enabled desktop runs still logged restricted certificate-store access and shutdown resource leaks"
+  ]
+}

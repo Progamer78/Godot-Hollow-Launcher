@@ -8,6 +8,12 @@
 #include "core/input/input_event.h"
 #include "core/os/keyboard.h"
 #include "core/config/project_settings.h"
+#include "core/object/class_db.h"
+#include "core/string/print_string.h"
+#include "modules/modules_enabled.gen.h"
+#ifdef MODULE_SPINE_GODOT_ENABLED
+#include "modules/spine_godot/spine-cpp/include/spine/Version.h"
+#endif
 #import <QuartzCore/QuartzCore.h>
 
 @interface GDTAppDelegateService (PlayerStart)
@@ -17,6 +23,8 @@
 // Set before Main::setup. Never changed within this process.
 NSString *player_save_path = nil;
 BOOL player_engine_ready = NO;
+BOOL player_main_started = NO;
+static NSString *requested_renderer;
 static BOOL attempted = NO;
 static NSMutableDictionary<NSString *, NSNumber *> *held_keys;
 static NSMutableDictionary<NSNumber *, NSNumber *> *held_mouse;
@@ -49,6 +57,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
     }
     attempted = YES;
     player_save_path = [savePath copy];
+    requested_renderer = [renderer copy];
     held_keys = [NSMutableDictionary new];
     held_mouse = [NSMutableDictionary new];
     NSMutableArray<NSString *> *arguments = [NSMutableArray arrayWithArray:@[
@@ -77,6 +86,40 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
     GDTViewController *controller = [GDTViewController new];
     GDTAppDelegateService.viewController = controller;
     return controller;
+}
+
++ (void)logRuntimeConfiguration {
+    print_line("Godot Player: requested renderer = " + String::utf8([requested_renderer UTF8String]));
+#ifdef MODULE_SPINE_GODOT_ENABLED
+    print_line("Godot Player: bundled Spine runtime = " SPINE_VERSION_STRING);
+#else
+    print_line("Godot Player: Spine runtime is not bundled");
+#endif
+    print_line(String("Godot Player: SpineSprite registered = ") + (ClassDB::class_exists("SpineSprite") ? "yes" : "no"));
+}
+
++ (NSString *)launchFailureMessage {
+    // Read only a bounded tail; a large game's log must not be loaded whole.
+    NSString *text = @"";
+    NSFileHandle *handle = [NSFileHandle fileHandleForReadingAtPath:[player_save_path stringByAppendingPathComponent:@"player.log"]];
+    if (handle) {
+        @try {
+            unsigned long long length = [handle seekToEndOfFile];
+            [handle seekToFileOffset:length > 65536 ? length - 65536 : 0];
+            text = [[NSString alloc] initWithData:[handle readDataOfLength:65536] encoding:NSUTF8StringEncoding] ?: @"";
+        } @catch (NSException *exception) {
+            text = @"";
+        } @finally {
+            [handle closeFile];
+        }
+    }
+    NSString *reason = @"The game's main scene could not load. It may require missing resources, native classes, or a different runtime.";
+    if ([text containsString:@"Spine"]) {
+        reason = ClassDB::class_exists("SpineSprite")
+            ? @"The game's Spine animation resources could not load. Its exported Spine version may differ from the version bundled in this player."
+            : @"This game requires the Spine animation runtime, which is not included in this player build. Changing the renderer cannot add the missing animation classes.";
+    }
+    return [reason stringByAppendingString:@" See player.log in the game's save folder for details. Close the app from the app switcher and reopen it before trying another game."];
 }
 
 + (void)setKey:(NSString *)key pressed:(BOOL)pressed {

@@ -115,7 +115,7 @@ struct PlayerRoot: View {
                     Text("WASD").tag("wasd")
                 }
                 TextField("Extra keys for reset layout", text: field(game, \.extraKeys))
-                Text("While playing, use Edit Controls to drag buttons, change keys, add buttons, and save a layout for this game. The Mouse toggle enables a visible pointer with trackpad or direct-touch control.").font(.caption)
+                Text("While playing, tap the small ⋯ button for mouse settings and Edit Controls. Drag ⋯ if it covers a game button. The menu starts closed, and layouts save separately for each game.").font(.caption)
                 Text("Project scaling and orientation are preserved where iOS permits. Diagnostic log: Files → Godot Player → GodotPlayerSaves → \(game.id.uuidString) → player.log").font(.caption)
             }
         }.navigationTitle(game.name)

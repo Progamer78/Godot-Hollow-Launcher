@@ -47,6 +47,10 @@ class BuildToolsTests(unittest.TestCase):
             self.assertNotIn("exit(0)", service)
             self.assertEqual(service.count("if (!player_engine_ready || !OS_AppleEmbedded::get_singleton()) return;"), 12)
             self.assertIn("player_save_path", (target / names[2]).read_text())
+            self.assertIn("player_main_started = Main::start() == EXIT_SUCCESS", (target / names[2]).read_text())
+            renderer = (target / "drivers/apple_embedded/godot_view_renderer.mm").read_text()
+            self.assertIn("!player_main_started || !OS::get_singleton()->get_main_loop()", renderer)
+            self.assertIn("[PlayerRuntime launchFailureMessage]", renderer)
             self.assertIn("Native game extensions are disabled", (target / names[4]).read_text())
             display = (target / "drivers/apple_embedded/display_server_apple_embedded.h").read_text()
             self.assertEqual(display.count('#include "player_mouse_display.inc"'), 1)
@@ -82,6 +86,49 @@ class BuildToolsTests(unittest.TestCase):
             self.assertNotIn("godot_cmdline", data)
             self.assertEqual((export / "player.pck").stat().st_size, 0)
             self.assertIn("Permission is hereby granted", (app / "en.lproj/InfoPlist.strings").read_text())
+            notice = export / "SPINE-LICENSE.txt"
+            notice.write_text("Spine Runtimes License Agreement\nPreserved notice", encoding="utf-8")
+            module("prepare_xcode").prepare(export, library, notice)
+            self.assertIn('"SpineRuntimeNotices"', (app / "en.lproj/InfoPlist.strings").read_text())
+            self.assertIn("Preserved notice", (app / "en.lproj/InfoPlist.strings").read_text())
+            notice.write_text("", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                module("prepare_xcode").prepare(export, library, notice)
+
+    def test_bundled_spine_module_configuration(self):
+        tool = module("prepare_spine")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            module_dir = source / "spine-godot/spine_godot"
+            module_dir.mkdir(parents=True)
+            (module_dir / "register_types.cpp").write_text("\n".join("GDREGISTER_CLASS(" + c + ");" for c in tool.REQUIRED_CLASSES))
+            (module_dir / "SCsub").write_text('env.Append(CPPPATH=["#../spine_godot/spine-cpp/include"])\nenv_spine_runtime.Append(CPPPATH=["#../spine_godot/spine-cpp/include"])')
+            header = source / "spine-cpp/spine-cpp/include/spine/Version.h"
+            header.parent.mkdir(parents=True)
+            header.write_text('#define SPINE_VERSION_STRING "4.2"')
+            license_text = "Spine Runtimes License Agreement\nOriginal copyright notice"
+            (source / "LICENSE").write_text(license_text)
+            engine = root / "engine"
+            report, notice = root / "report.json", root / "notice.txt"
+            tool.prepare(engine, source, "4.2", report, notice, verify_revision=False)
+            installed = engine / "modules/spine_godot"
+            self.assertTrue((installed / "spine-cpp/include/spine/Version.h").is_file())
+            self.assertEqual((installed / "LICENSE").read_text(), license_text)
+            self.assertEqual(notice.read_text(), license_text)
+            self.assertEqual((installed / "SCsub").read_text().count("#modules/spine_godot/spine-cpp/include"), 2)
+            with self.assertRaises(RuntimeError):
+                tool.prepare(engine, source, "4.2", report, notice, verify_revision=False)
+            with self.assertRaises(RuntimeError):
+                tool.prepare(root / "wrong-version", source, "4.1", report, notice, verify_revision=False)
+            self.assertFalse((root / "wrong-version/modules/spine_godot").exists())
+
+    def test_standard_build_can_exclude_spine(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            module("prepare_spine").prepare(root / "engine", root / "unused", "none", root / "report.json", root / "notice.txt")
+            self.assertFalse((root / "engine/modules/spine_godot").exists())
+            self.assertFalse((root / "notice.txt").exists())
 
 
 if __name__ == "__main__":
