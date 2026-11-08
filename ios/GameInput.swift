@@ -1,5 +1,4 @@
-import SwiftUI
-import UIKit
+import Foundation
 
 enum GameInput {
     static let padNames = ["Pad A", "Pad B", "Pad X", "Pad Y", "Pad L1", "Pad R1", "Pad Select", "Pad Start", "Pad L3", "Pad R3", "Pad Up", "Pad Down", "Pad Left", "Pad Right"]
@@ -27,26 +26,19 @@ enum GameInput {
         padHolds.removeAll(); keyCounts.removeAll(); axes.removeAll()
         NotificationCenter.default.post(name: Notification.Name("GodotPlayerReleaseInputs"), object: nil)
     }
-}
 
-struct TextEntryPanel: View {
-    @Environment(\.presentationMode) private var presentation
-    @State private var text = ""
-    @State private var status = "Tap the game's text field before opening this panel."
-    var body: some View {
-        NavigationView {
-            Form {
-                Text(status).font(.caption)
-                TextEditor(text: $text).frame(minHeight: 100).autocapitalization(.none).disableAutocorrection(true)
-                Button("Send Text") {
-                    let reply = ToolsBridge.send(["action": "input", "kind": "text", "text": String(text.prefix(2048))])
-                    if reply.ok { presentation.wrappedValue.dismiss() } else { status = reply.message ?? "The game's input is not ready." }
-                }
-                Button("Press Enter") { GameInput.key("Enter", pressed: true); GameInput.key("Enter", pressed: false) }
-                Button("Press Backspace") { GameInput.key("Backspace", pressed: true); GameInput.key("Backspace", pressed: false) }
-                Button("Paste into panel") { text = String((UIPasteboard.general.string ?? "").prefix(2048)) }
-                Text("Text is sent as Unicode key events. Games using custom text systems may handle these differently.").font(.caption)
-            }.navigationTitle("Keyboard & Text").toolbar { Button("Done") { presentation.wrappedValue.dismiss() } }
-        }.navigationViewStyle(StackNavigationViewStyle())
+    @discardableResult
+    static func text(_ text: String) -> Bool {
+        // Bound each native request in Unicode scalars (including on Godot 3's
+        // UTF-16 builds). Paste uses the same input path as ordinary typing.
+        var chunk = "", count = 0
+        for scalar in text.unicodeScalars {
+            chunk.unicodeScalars.append(scalar); count += 1
+            if count == 512 {
+                guard ToolsBridge.send(["action": "input", "kind": "text", "text": chunk]).ok else { return false }
+                chunk = ""; count = 0
+            }
+        }
+        return chunk.isEmpty || ToolsBridge.send(["action": "input", "kind": "text", "text": chunk]).ok
     }
 }

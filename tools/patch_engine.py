@@ -4,7 +4,7 @@ import argparse
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH_REVISION = "archive-textual-cxx-link-v8"
+PATCH_REVISION = "input-lifetime-keyboard-v9"
 
 
 def replace(path, old, new):

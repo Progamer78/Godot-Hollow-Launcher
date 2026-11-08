@@ -321,6 +321,8 @@ class BuildToolsTests(unittest.TestCase):
             self.assertIn('#include "core/input/input.h"', display)
             self.assertTrue((target / "drivers/apple_embedded/GameControls.swift").is_file())
             self.assertTrue((target / "drivers/apple_embedded/ControlProfile.swift").is_file())
+            self.assertTrue((target / "drivers/apple_embedded/InputViews.swift").is_file())
+            self.assertTrue((target / "drivers/apple_embedded/KeyboardInput.swift").is_file())
             self.assertTrue((target / "modules/player_tools/player_tools.cpp").is_file())
             self.assertTrue((target / "drivers/apple_embedded/player_mouse_display.inc").is_file())
             features = (target / "drivers/apple_embedded/display_server_apple_embedded.mm").read_text()

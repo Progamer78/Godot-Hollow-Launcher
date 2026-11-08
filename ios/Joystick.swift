@@ -69,6 +69,8 @@ final class JoystickTouchView: UIView {
     private var activeTouch: UITouch?
     private var origin = CGPoint.zero
     private var held = Set<String>()
+    private var analogActive = false
+    private var previousSize = CGSize.zero
     override init(frame: CGRect) {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
@@ -89,9 +91,9 @@ final class JoystickTouchView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         // Resizing/rotation releases the owning touch instead of sticking a key.
-        cancelTouch()
+        if previousSize != bounds.size { cancelTouch(); previousSize = bounds.size }
         if configuration.mode == "fixed" { origin = CGPoint(x: bounds.midX, y: bounds.midY) }
-        drawStick(offset: .zero)
+        if activeTouch == nil { drawStick(offset: .zero) }
     }
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         if configuration.mode == "floating" { return bounds.contains(point) }
@@ -113,6 +115,7 @@ final class JoystickTouchView: UIView {
         let distance = hypot(dx, dy), scale = distance > radius ? radius / distance : 1
         let next = configuration.output == "gamepad" ? Set<String>() : configuration.keys(dx: Double(dx / radius), dy: Double(dy / radius))
         if configuration.output == "gamepad" {
+            analogActive = true
             let axes = configuration.analog(dx: Double(dx / radius), dy: Double(dy / radius))
             GameInput.axis(configuration.axis ?? 0, value: axes.0)
             GameInput.axis((configuration.axis ?? 0) + 1, value: axes.1)
@@ -123,10 +126,11 @@ final class JoystickTouchView: UIView {
         drawStick(offset: CGPoint(x: dx * scale, y: dy * scale))
     }
     @objc func cancelTouch() {
-        if configuration.output == "gamepad" {
+        if analogActive {
             GameInput.axis(configuration.axis ?? 0, value: 0)
             GameInput.axis((configuration.axis ?? 0) + 1, value: 0)
         }
+        analogActive = false
         for key in held { GameInput.key(key, pressed: false) }
         held.removeAll(); activeTouch = nil
         drawStick(offset: .zero)

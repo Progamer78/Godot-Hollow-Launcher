@@ -179,6 +179,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 
 + (void)setKey:(NSString *)key pressed:(BOOL)pressed {
     if (godot3) { godot3->key(key, pressed); return; }
+    if (!player_main_started) return;
     if (!Input::get_singleton() || !held_keys) return;
     if ([key isEqualToString:@"Mouse Left"]) { [self setMouseButton:1 pressed:pressed]; return; }
     if ([key isEqualToString:@"Mouse Right"]) { [self setMouseButton:2 pressed:pressed]; return; }
@@ -215,6 +216,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 
 + (void)setMouseEnabled:(BOOL)enabled {
     if (godot3) { godot3->mouseEnabled(enabled); return; }
+    if (!player_main_started) return;
     Input *input = Input::get_singleton();
     if (!input) return;
     if (mouse_enabled == enabled) {
@@ -242,6 +244,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 
 + (void)moveMouse:(CGPoint)point fromView:(UIView *)source relative:(BOOL)relative {
     if (godot3) { godot3->moveMouse(point, source, relative); return; }
+    if (!player_main_started) return;
     Input *input = Input::get_singleton();
     if (!input || !mouse_enabled) return;
     UIView *view = GDTAppDelegateService.viewController.godotView;
@@ -276,6 +279,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 
 + (CGPoint)mousePositionInView:(UIView *)target {
     if (godot3) return godot3->mousePosition(target);
+    if (!player_main_started) return CGPointZero;
     Input *input = Input::get_singleton();
     if (!input) return CGPointZero;
     UIView *view = GDTAppDelegateService.viewController.godotView;
@@ -286,6 +290,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 
 + (void)setMouseButton:(NSInteger)button pressed:(BOOL)pressed {
     if (godot3) { godot3->mouseButton(button, pressed); return; }
+    if (!player_main_started) return;
     Input *input = Input::get_singleton();
     if (!input || button < 1 || button > 3 || !held_mouse) return;
     if (!change_hold(held_mouse, @(button), pressed)) return;
@@ -314,6 +319,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 
 + (void)scrollMouse:(NSInteger)direction {
     if (godot3) { godot3->scroll(direction); return; }
+    if (!player_main_started) return;
     Input *input = Input::get_singleton();
     if (!input) return;
     for (bool pressed : { true, false }) {
@@ -331,12 +337,14 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 
 + (BOOL)mouseCaptured {
     if (godot3) return godot3->captured();
+    if (!player_main_started) return NO;
     auto *display = DisplayServerAppleEmbedded::get_singleton();
     return display && display->player_get_effective_mouse_mode() == DisplayServerEnums::MOUSE_MODE_CAPTURED;
 }
 
 + (BOOL)mouseCursorVisible {
     if (godot3) return godot3->cursorVisible();
+    if (!player_main_started) return NO;
     auto *display = DisplayServerAppleEmbedded::get_singleton();
     if (!display) return NO;
     auto mode = display->player_get_effective_mouse_mode();
@@ -345,12 +353,14 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 
 + (NSUInteger)mouseCursorRevision {
     if (godot3) return 1;
+    if (!player_main_started) return 0;
     auto *display = DisplayServerAppleEmbedded::get_singleton();
     return display ? display->player_get_cursor_revision() : 0;
 }
 
 + (UIImage *)mouseCursorImage {
     if (godot3) return nil;
+    if (!player_main_started) return nil;
     auto *display = DisplayServerAppleEmbedded::get_singleton();
     if (!display) return nil;
     Ref<Image> image = display->player_get_cursor_image();
@@ -362,6 +372,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 
 + (CGPoint)mouseCursorHotspot {
     if (godot3) return CGPointZero;
+    if (!player_main_started) return CGPointZero;
     auto *display = DisplayServerAppleEmbedded::get_singleton();
     if (!display) return CGPointZero;
     Vector2 hotspot = display->player_get_cursor_hotspot();
