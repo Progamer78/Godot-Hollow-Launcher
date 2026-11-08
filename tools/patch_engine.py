@@ -4,7 +4,7 @@ import argparse
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH_REVISION = "imports-save-vault-controls-tools-v7"
+PATCH_REVISION = "archive-textual-cxx-link-v8"
 
 
 def replace(path, old, new):
@@ -24,6 +24,15 @@ def patch(engine):
     for source in (ROOT / "ios").iterdir():
         if source.suffix in (".swift", ".mm", ".h", ".inc"):
             shutil.copy2(source, apple / source.name)
+    # Compile this Foundation-only bridge with textual standard-library headers.
+    # Xcode 26's C++ modules left a libc++ allocator template undefined in its
+    # optimized vector<Entry> instantiation. Keep the other drivers unchanged.
+    replace(apple / "SCsub",
+        'env_apple_embedded.add_source_files(env_apple_embedded.drivers_sources, "*.mm")',
+        'env_apple_embedded.add_source_files(env_apple_embedded.drivers_sources, [source for source in Glob("*.mm") if source.name != "ArchiveSupport.mm"])\n'
+        'env_archive = env_apple_embedded.Clone()\n'
+        'env_archive.Append(CCFLAGS=["-fno-modules", "-fno-cxx-modules"])\n'
+        'env_archive.add_source_files(env_apple_embedded.drivers_sources, "ArchiveSupport.mm")')
     app = apple / "app.swift"
     original = app.read_text(encoding="utf-8")
     app.write_text(original[:original.index("import SwiftUI")] + "// Entry point provided by PlayerApp.swift.\n", encoding="utf-8")

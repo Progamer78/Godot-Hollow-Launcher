@@ -259,6 +259,7 @@ class BuildToolsTests(unittest.TestCase):
             "drivers/apple_embedded/godot_view_apple_embedded.mm",
             "drivers/apple_embedded/display_server_apple_embedded.h",
             "drivers/apple_embedded/display_server_apple_embedded.mm",
+            "drivers/apple_embedded/SCsub",
         ]
         engine = ROOT / ".cache/godot-source"
         archive = ROOT / ".cache/source.zip"
@@ -275,6 +276,36 @@ class BuildToolsTests(unittest.TestCase):
                     with zipfile.ZipFile(archive) as source:
                         path.write_bytes(source.read("godot-4.7.2-stable/" + name))
             module("patch_engine").patch(target)
+            # Execute the real patched SCsub with a tiny source-graph environment.
+            # The archive must occur once under isolated flags; other drivers
+            # retain their original module-enabled compilation environment.
+            graph = []
+            class DriverEnvironment(dict):
+                drivers_sources = []
+                def __init__(self, flags=()):
+                    super().__init__(APPLE_PLATFORM="ios", APPLE_SDK_PATH="test-sdk")
+                    self.flags = list(flags)
+                def Clone(self): return DriverEnvironment(self.flags)
+                def Append(self, **kwargs): self.flags.extend(kwargs.get("CCFLAGS", []))
+                def Prepend(self, **kwargs): pass
+                def add_source_files(self, output, sources):
+                    names = [sources] if isinstance(sources, str) else [source.name for source in sources]
+                    graph.extend((name, list(self.flags)) for name in names)
+            class Node:
+                abspath = "test-driver"
+                def __init__(self, name): self.name = name
+            source = (target / "drivers/apple_embedded/SCsub").read_text()
+            body = "\n".join(line for line in source.splitlines() if not line.startswith("from "))
+            exec(compile(body, "SCsub", "exec"), {
+                "Import": lambda *args: None, "env": DriverEnvironment(), "Dir": Node,
+                "Glob": lambda pattern: [Node(name) for name in (["ArchiveSupport.mm", "PlayerRuntime.mm"] if pattern == "*.mm" else ["PlayerApp.swift"])],
+                "setup_swift_builder": lambda *args: None,
+            })
+            archive_flags = [flags for name, flags in graph if name == "ArchiveSupport.mm"]
+            self.assertEqual(len(archive_flags), 1)
+            self.assertEqual(archive_flags[0][-2:], ["-fno-modules", "-fno-cxx-modules"])
+            self.assertIn(("PlayerRuntime.mm", ["-fmodules", "-fcxx-modules"]), graph)
+            self.assertIn(("*.swift", ["-fmodules", "-fcxx-modules"]), graph)
             service = (target / names[1]).read_text()
             self.assertIn("startPlayerWithArguments:", service)
             self.assertNotIn("exit(0)", service)
@@ -297,6 +328,22 @@ class BuildToolsTests(unittest.TestCase):
                 self.assertIn("case DisplayServerEnums::" + feature + ":", features)
             with self.assertRaises(RuntimeError):
                 module("patch_engine").patch(target)
+
+    def test_archive_iphone_link_preflight(self):
+        preflight = module("check_ios_archive_link")
+        engine = Path("engine")
+        output = Path("proof")
+        steps = preflight.commands(engine, output, "iphone-sdk")
+        self.assertEqual(len(steps), 5)
+        compile_bridge, link = steps[-2:]
+        for flag in ["-Os", "-fno-exceptions", "-fobjc-arc", "-fno-modules", "-fno-cxx-modules"]:
+            self.assertIn(flag, compile_bridge)
+        self.assertIn(str(engine / "drivers/apple_embedded/ArchiveSupport.mm"), compile_bridge)
+        self.assertIn("arm64-apple-ios14.0", link)
+        self.assertIn("-Wl,-undefined,error", link)
+        self.assertNotIn("dynamic_lookup", " ".join(link))
+        self.assertTrue(all(str(output / (name + ".o")) in link for name in ["ioapi", "unzip", "zip", "ArchiveSupport"]))
+        self.assertEqual(compile_bridge[compile_bridge.index("-isysroot") + 1], "iphone-sdk")
 
     def test_export_preparation_preserves_pipeline(self):
         with tempfile.TemporaryDirectory() as temporary:

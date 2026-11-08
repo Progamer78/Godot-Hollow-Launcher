@@ -24,10 +24,11 @@ def build(engine, output):
         objects.append(str(obj))
     executable = output / ("archive-tests" if mac else "archive-tests.exe")
     libs = ["-lz"] if mac else ["-static"]
-    subprocess.run(cxx + include + ["-std=c++17", "-O1", str(ROOT / "tests/archive_core.cpp"), *objects, *libs, "-o", str(executable)], check=True)
+    archive_flags = ["-std=gnu++17", "-Os", "-fno-exceptions", "-fno-modules", "-fno-cxx-modules"]
+    subprocess.run(cxx + include + archive_flags + [str(ROOT / "tests/archive_core.cpp"), *objects, *libs, "-o", str(executable)], check=True)
     if mac:
         bridge = output / "ArchiveSupport.o"
-        subprocess.run(cxx + include + ["-std=c++17", "-fobjc-arc", "-c", str(ROOT / "ios/ArchiveSupport.mm"), "-o", str(bridge)], check=True)
+        subprocess.run(cxx + include + archive_flags + ["-fobjc-arc", "-c", str(ROOT / "ios/ArchiveSupport.mm"), "-o", str(bridge)], check=True)
         subprocess.run(ar + ["rcs", str(output / "libplayer_archive.a"), str(bridge), *objects], check=True)
     return executable
 

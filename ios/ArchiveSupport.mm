@@ -1,3 +1,6 @@
+// Include the public memory definitions explicitly; do not depend on vector's
+// transitive libc++ module imports for allocator destruction templates.
+#include <memory>
 #import "ArchiveSupport.h"
 #include "ArchiveCore.inc"
 static void archive_error(NSError **error, const std::string &message) {
