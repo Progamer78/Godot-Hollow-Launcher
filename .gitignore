@@ -4,6 +4,11 @@ artifacts/
 **/.godot/
 **/__pycache__/
 GodotPlayerReference/
+Goodbye_Eternity-*/
+RecentGithubFail/
+RecentGithubFail2/
+RecentGithubFail3/
+Errors/
 *.ipa
 *.xcarchive/
 *.xcuserstate
