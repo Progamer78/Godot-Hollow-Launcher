@@ -23,7 +23,11 @@ def build(engine, output):
                "-Wl,-force_load," + str(library.resolve()),
                "-Wl,-exported_symbols_list," + str(exports.resolve()),
                "-install_name", "@rpath/Godot3Runtime.framework/Godot3Runtime", "-lz", "-liconv", "-lresolv", "-lc++"]
-    for name in ["Foundation", "CoreFoundation", "CoreGraphics", "CoreText", "UIKit", "QuartzCore", "OpenGLES", "AudioToolbox", "AudioUnit", "AVFoundation",
+    # iOS exposes Audio Unit headers, but its Audio Unit implementation is
+    # linked through AudioToolbox. AudioUnit.framework is not a separate iOS
+    # link target. See Apple's Audio Unit Extensions WWDC 2015 session:
+    # https://devstreaming-cdn.apple.com/videos/wwdc/2015/508691kyzp/508/508_audio_unit_extensions.pdf
+    for name in ["Foundation", "CoreFoundation", "CoreGraphics", "CoreText", "UIKit", "QuartzCore", "OpenGLES", "AudioToolbox", "AVFoundation",
                  "CoreAudio", "CoreMedia", "CoreVideo", "CoreMotion", "CoreHaptics", "GameController",
                  "MediaPlayer", "Security", "SystemConfiguration"]:
         command += ["-framework", name]

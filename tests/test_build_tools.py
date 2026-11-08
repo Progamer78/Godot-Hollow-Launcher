@@ -18,6 +18,43 @@ def module(name):
 
 
 class BuildToolsTests(unittest.TestCase):
+    def test_godot3_framework_link_and_audits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / "engine"
+            library = engine / "bin/libgodot.iphone.opt.arm64.a"
+            library.parent.mkdir(parents=True)
+            library.write_bytes(b"compiled-archive-fixture")
+            for name in ["LICENSE.txt", "COPYRIGHT.txt", "AUTHORS.md"]:
+                (engine / name).write_text(name)
+            marker = engine / "platform/iphone/player3-patch.json"
+            marker.parent.mkdir(parents=True)
+            marker.write_text('{"objc_names":["GP3GodotView","GP3ViewController"]}')
+            notice = engine / "modules/spine_godot/LICENSE"
+            notice.parent.mkdir(parents=True)
+            notice.write_text("Spine preserved notice")
+            output = root / "output"
+            tool = module("build_godot3_framework")
+            responses = ["/test/iPhoneOS.sdk\n", "_GP3GetAPI\n",
+                         "name 0x100 GP3GodotView\nname 0x200 GP3ViewController\n"]
+            with mock_patch.object(tool.subprocess, "check_output", side_effect=responses), mock_patch.object(tool.subprocess, "run") as linker:
+                tool.build(engine, output)
+            command = linker.call_args.args[0]
+            frameworks = [command[i + 1] for i, flag in enumerate(command) if flag == "-framework"]
+            self.assertIn("AudioToolbox", frameworks)
+            self.assertNotIn("AudioUnit", frameworks, "Audio Unit headers are present on iOS, but AudioToolbox supplies its link symbols")
+            self.assertEqual(command[:4], ["xcrun", "--sdk", "iphoneos", "clang++"])
+            self.assertEqual(command[command.index("-isysroot") + 1], "/test/iPhoneOS.sdk")
+            self.assertIn("-Wl,-force_load," + str(library.resolve()), command)
+            self.assertIn("-Wl,-twolevel_namespace", command)
+            framework = output / "Godot3Runtime.framework"
+            self.assertEqual(plistlib.loads((framework / "Info.plist").read_bytes())["MinimumOSVersion"], "15.0")
+            self.assertEqual((framework / "SPINE-RUNTIMES-LICENSE.txt").read_text(), "Spine preserved notice")
+            self.assertEqual((output / "godot3-exports.txt").read_text(), "_GP3GetAPI\n")
+            with mock_patch.object(tool.subprocess, "check_output", side_effect=[responses[0], "_GP3GetAPI\n_leaked_engine_symbol\n"]), mock_patch.object(tool.subprocess, "run"):
+                with self.assertRaisesRegex(RuntimeError, "Unexpected Godot 3 public exports"):
+                    tool.build(engine, output)
+
     def test_legacy_script_reader_and_builtin_limbo_staging(self):
         engine = ROOT / ".cache/godot-source"
         archive = ROOT / ".cache/source.zip"
