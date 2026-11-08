@@ -1,0 +1,79 @@
+name: Build native Godot Player
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  export-and-build:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup matching official Godot and export templates
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: '4.7.2'
+          use-dotnet: false
+          include-templates: true
+      - name: Checkout official engine release
+        uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot
+          ref: ed1daf0bf001b61586d9930840f2f1394092c079 # 4.7.2-stable
+          path: .cache/godot-source
+          persist-credentials: false
+      - name: Export and execute two independent PCKs
+        run: python3 tools/desktop_proof.py "$(command -v godot)"
+      - name: Test native pack inspector
+        run: |
+          swiftc -swift-version 5 ios/PCKInspector.swift tests/pck/main.swift -o build/pck-tests
+          build/pck-tests build/proof/movement.pck build/proof/counter.pck
+          python3 -m unittest discover -s tests -v
+      - name: Patch the runtime startup and save path
+        run: python3 tools/patch_engine.py .cache/godot-source
+      - name: Compile ARM64 runtime with external main-pack support
+        run: |
+          python3 -m venv .cache/scons-env
+          .cache/scons-env/bin/pip install scons==4.10.1
+          cd .cache/godot-source
+          ../scons-env/bin/scons platform=ios target=template_release arch=arm64 \
+            disable_path_overrides=no vulkan=no metal=yes opengl3=yes \
+            debug_symbols=no optimize=size -j"$(sysctl -n hw.logicalcpu)"
+      - name: Export Xcode project using the working reference pipeline
+        run: |
+          mkdir -p build/ios
+          godot --headless --path bootstrap --editor --import
+          godot --headless --path bootstrap --export-release iOS "$PWD/build/ios/player.xcodeproj"
+          python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a
+      - name: Build Xcode archive (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project build/ios/player.xcodeproj \
+            -scheme player -sdk iphoneos -configuration Release \
+            -archivePath build/ios/player.xcarchive \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_STYLE=Manual DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" CODE_SIGN_ENTITLEMENTS="" \
+            OTHER_CODE_SIGN_FLAGS="" | tee build/xcodebuild.log
+      - name: Package IPA for personal signing
+        run: |
+          mkdir -p build/package/Payload
+          cp -R build/ios/player.xcarchive/Products/Applications/*.app build/package/Payload/
+          cd build/package
+          zip -qr ../GodotPlayer-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GodotPlayer-build-and-tests
+          path: |
+            build/GodotPlayer-unsigned.ipa
+            build/xcodebuild.log
+            build/proof/*.pck
+            build/proof/*.log
+            build/proof/results.json
