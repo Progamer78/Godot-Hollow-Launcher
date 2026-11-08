@@ -125,6 +125,11 @@ jobs:
             -import-objc-header .cache/godot-source/drivers/apple_embedded/bridging_header_apple_embedded.h \
             .cache/godot-source/drivers/apple_embedded/*.swift \
             2>&1 | tee build/ios-typecheck.log
+      - name: Compile and link archive importer for iPhone before building engines
+        run: |
+          set -o pipefail
+          python3 tools/check_ios_archive_link.py .cache/godot-source build/ios-archive-link \
+            2>&1 | tee build/ios-archive-link.log
       - name: Compile isolated Godot 3 framework
         run: |
           set -o pipefail
@@ -197,6 +202,7 @@ jobs:
           path: |
             build/GodotPlayer-unsigned.ipa
             build/ipa-audit.json
+            build/ios-archive-link/results.json
             build/*.log
             build/spine-build.json
             build/spine3-build.json
