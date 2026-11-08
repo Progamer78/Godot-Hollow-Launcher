@@ -1,0 +1,38 @@
+{
+  "source_log": "Errors/export-and-build/18_Compile isolated Godot 3 framework.txt",
+  "source_log_sha256": "80cc2f2a0d90c9e796b344e589ccec65bdb2ec6c83b5150cb0d771c8805d6048",
+  "ci": {
+    "pck_checks_passed": 263,
+    "models": "passed",
+    "iphone_swift_typecheck": "passed",
+    "python_tests_passed": 8,
+    "godot3_arm64_archive": "compiled",
+    "framework_link": "failed: godot_ios_plugins_initialize/deinitialize undefined",
+    "ipa_produced": false
+  },
+  "fix": {
+    "source": "runtime3/player3_plugins.cpp",
+    "staged_by": "tools/patch_godot3.py",
+    "compiled_in": "platform/iphone/SCsub",
+    "behavior": "Empty exporter-generated native-plugin callbacks; built-in modules unaffected; no imported native plugin loading."
+  },
+  "local_validation": {
+    "tests_passed": 9,
+    "tests_skipped": 0,
+    "architecture": "arm64-apple-ios15.0",
+    "format": "Mach-O",
+    "compiler": "LLVM clang++",
+    "linker": "LLVM lld Darwin",
+    "upstream_source": "Official 3.6.3 platform/iphone/api/api.cpp and api.h",
+    "negative_control": "API object without callbacks fails with both missing symbols",
+    "positive_control": "API and callbacks link; zero undefined symbols",
+    "full_ios_framework_link": "not run",
+    "ipa_produced": false
+  },
+  "pending": [
+    "Full repaired engine framework link on macOS",
+    "Godot 4 ARM64 compilation",
+    "Archive and IPA packaging",
+    "Code signing and iPhone tests"
+  ]
+}

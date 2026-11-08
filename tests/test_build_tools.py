@@ -1,4 +1,5 @@
 import importlib.util
+from collections import Counter
 from pathlib import Path
 import plistlib
 import shutil
@@ -20,6 +21,52 @@ def module(name):
 
 
 class BuildToolsTests(unittest.TestCase):
+    def test_godot3_navigation_objects_are_added_once(self):
+        engine = ROOT / ".cache/godot3-source"
+        relative = "modules/navigation/SCsub"
+        if (engine / relative).is_file():
+            original = (engine / relative).read_text()
+        else:
+            with zipfile.ZipFile(ROOT / ".cache/godot3-source.zip") as archive:
+                original = archive.read("godot-3.6.3-stable/" + relative).decode()
+
+        class Environment(dict):
+            def __init__(self, recast, rvo):
+                super().__init__(builtin_recast=recast, builtin_rvo2=rvo)
+                self.modules_sources = []
+                self.dependencies = []
+            def Clone(self): return self
+            def Prepend(self, **kwargs): pass
+            def disable_warnings(self): pass
+            def add_source_files(self, objects, sources):
+                objects.extend([sources] if isinstance(sources, str) else sources)
+            def Depends(self, objects, dependencies): self.dependencies = list(dependencies)
+
+        def graph(source, recast, rvo):
+            env = Environment(recast, rvo)
+            exec(compile(source, relative, "exec"), {"Import": lambda *args: None, "env": env, "env_modules": env})
+            return env
+
+        broken = graph(original, True, True)
+        duplicates = {name: count for name, count in Counter(broken.modules_sources).items() if count > 1}
+        self.assertEqual(len(duplicates), 11, "Reproduce the 11 duplicated Recast objects in the supplied link failure")
+        self.assertEqual(set(duplicates.values()), {2})
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            file = target / relative
+            file.parent.mkdir(parents=True)
+            file.write_text(original)
+            module("patch_godot3").patch_navigation(target)
+            repaired = file.read_text()
+            for recast, rvo in [(True, True), (True, False), (False, True), (False, False)]:
+                with self.subTest(recast=recast, rvo=rvo):
+                    before = graph(original, recast, rvo)
+                    after = graph(repaired, recast, rvo)
+                    self.assertEqual(set(after.modules_sources), set(before.modules_sources), "Keep every enabled navigation source")
+                    self.assertEqual(len(after.modules_sources), len(set(after.modules_sources)), "Each object must enter the archive once")
+                    self.assertEqual(len(after.dependencies), (11 if recast else 0) + (2 if rvo else 0))
+                    self.assertEqual(set(after.dependencies), set(after.modules_sources) - {"*.cpp"})
+
     def test_godot3_ios_plugin_callbacks_link(self):
         # Exercise the real C++ ABI and ARM64 Mach-O linker, including a
         # negative control that reproduces the two missing export callbacks.
@@ -59,6 +106,19 @@ class BuildToolsTests(unittest.TestCase):
             self.assertIn("godot_ios_plugins_deinitialize", failed.stderr)
             subprocess.run(linker + [str(obj) for obj in objects] + ["-o", str(image)], check=True, capture_output=True, text=True)
             self.assertEqual(subprocess.check_output(nm + [str(image)], text=True).strip(), "", "Both callbacks must resolve without host-engine symbols")
+            # Match the framework's force-load path, which reveals duplicates
+            # that an ordinary archive search can leave unnoticed.
+            ar = ["xcrun", "ar"] if sys.platform == "darwin" else [str(tools / "llvm-ar.exe")]
+            duplicated = root / "duplicated.a"
+            archive = root / "unique.a"
+            subprocess.run(ar + ["qc", str(duplicated), str(objects[0]), str(objects[1]), str(objects[1])], check=True, capture_output=True)
+            failed = subprocess.run(linker + ["-Wl,-force_load," + str(duplicated), "-o", str(image)] if sys.platform == "darwin" else linker + ["-force_load", str(duplicated), "-o", str(image)], capture_output=True, text=True)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("duplicate symbol", failed.stderr)
+            subprocess.run(ar + ["qc", str(archive)] + [str(obj) for obj in objects], check=True, capture_output=True)
+            force_load = ["-Wl,-force_load," + str(archive)] if sys.platform == "darwin" else ["-force_load", str(archive)]
+            subprocess.run(linker + force_load + ["-o", str(image)], check=True, capture_output=True, text=True)
+            self.assertEqual(subprocess.check_output(nm + [str(image)], text=True).strip(), "")
 
     def test_godot3_framework_link_and_audits(self):
         with tempfile.TemporaryDirectory() as temporary:

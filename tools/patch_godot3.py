@@ -16,11 +16,25 @@ def replace(path, old, new):
     path.write_text(text.replace(old, new), encoding="utf-8", newline="\n")
 
 
+def patch_navigation(engine):
+    # Upstream appends Recast's objects, adds RVO2 to that same list, then
+    # appends the entire list again. A normal archive search can hide this;
+    # force-loading the framework exposes duplicate Recast definitions.
+    # Accumulate both libraries and append once, retaining all dependencies.
+    navigation = engine / "modules/navigation/SCsub"
+    replace(navigation, "    env.modules_sources += thirdparty_obj\n\n# RVO2",
+            "\n# RVO2")
+    replace(navigation, "    env.modules_sources += thirdparty_obj\n\n\n# Godot source files",
+            "env.modules_sources += thirdparty_obj\n\n\n# Godot source files")
+    print("Godot 3 navigation archive: Recast/RVO2 objects appended once.")
+
+
 def patch(engine):
     ios = engine / "platform/iphone"
     marker = ios / "player3-patch.json"
     if marker.exists():
         raise RuntimeError("Use a clean Godot 3.6.3 source tree.")
+    patch_navigation(engine)
     shutil.copytree(ROOT / "runtime_shared/player_tools", engine / "modules/player_tools")
     # Runtime registration of Objective-C classes/protocols is process-wide,
     # regardless of Mach-O symbol visibility. Prefix every engine-owned name.

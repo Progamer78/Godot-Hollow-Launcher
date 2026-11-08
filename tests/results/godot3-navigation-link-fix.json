@@ -1,0 +1,54 @@
+{
+  "source_log": "Errors/export-and-build/18_Compile isolated Godot 3 framework.txt",
+  "source_log_sha256": "fa36c4581d858b545c65763cedb1f780f9bda551ae6775aae133e48e6dcc9914",
+  "ci": {
+    "pck_checks_passed": 263,
+    "model_tests": "passed",
+    "iphone_swift_typecheck": "passed",
+    "python_tests_passed": 9,
+    "godot3_arm64_archive": "compiled including plugin callbacks",
+    "framework_link": "failed: 75 duplicate Recast symbols",
+    "godot4_arm64_build": "not reached",
+    "ipa_produced": false
+  },
+  "fix": {
+    "file": "tools/patch_godot3.py",
+    "behavior": "Patch modules/navigation/SCsub to append accumulated Recast/RVO2 objects once, outside optional-library conditionals. Preserve every enabled source and dependency. Keep force_load and strict duplicate-symbol checks."
+  },
+  "local_validation": {
+    "tests_passed": 10,
+    "tests_skipped": 0,
+    "source_graph": "Real original SCsub reproduces 11 duplicated Recast objects; patched graph has no repeated object and preserves all sources/dependencies in all 4 configurations.",
+    "native_force_load_fixture": "ARM64 Mach-O archive with repeated object fails; unique object archive links with zero undefined symbols.",
+    "reference_archive_audit": {
+      "archive": "GodotPlayerReference/ExportTemplates/3.6.3/iphone/libgodot.iphone.release.xcframework/ios-arm64/libgodot.a",
+      "strong_duplicate_symbol_count": 75,
+      "object_names": [
+        "Recast.iphone.opt.arm64.o:",
+        "RecastAlloc.iphone.opt.arm64.o:",
+        "RecastArea.iphone.opt.arm64.o:",
+        "RecastContour.iphone.opt.arm64.o:",
+        "RecastFilter.iphone.opt.arm64.o:",
+        "RecastLayers.iphone.opt.arm64.o:",
+        "RecastMesh.iphone.opt.arm64.o:",
+        "RecastMeshDetail.iphone.opt.arm64.o:",
+        "RecastRasterization.iphone.opt.arm64.o:",
+        "RecastRegion.iphone.opt.arm64.o:"
+      ]
+    },
+    "actual_reference_objects": {
+      "reference_recast_objects": 11,
+      "identical_copies_each": 2,
+      "original_archive_force_load": "failed: duplicate definitions",
+      "single_list_archive_force_load": "passed: no duplicate definitions",
+      "architecture": "actual ARM64 Mach-O objects from official 3.6.3 iOS release template",
+      "limit": "Apple math/libc/C++ runtime dependencies deliberately unresolved via dynamic_lookup for this local duplicate-definition check. Not a runnable engine/framework, not the app link policy."
+    }
+  },
+  "pending": [
+    "Full corrected iOS engine framework link and audits",
+    "Godot 4 ARM64 compilation",
+    "IPA packaging/signing",
+    "iPhone verification"
+  ]
+}

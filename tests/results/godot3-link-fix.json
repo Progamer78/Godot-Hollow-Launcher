@@ -1,0 +1,26 @@
+{
+  "source_log": "Errors/export-and-build/18_Compile isolated Godot 3 framework.txt",
+  "source_log_sha256": "ce68e6b535a0a5f38449dfc768128674c0a065ae8bfe650fa5b2e3a11a8411e6",
+  "verified_in_supplied_ci": {
+    "pck_checks": 263,
+    "model_tests": "passed",
+    "iphone_swift_typecheck": "passed",
+    "python_tests": 7,
+    "godot3_arm64_adapter": "compiled",
+    "godot3_arm64_full_archive": "compiled",
+    "framework_link": "failed: framework AudioUnit not found",
+    "godot4_arm64_build": "not reached",
+    "ipa_produced": false
+  },
+  "fix": "Remove separate AudioUnit framework link; retain AudioToolbox for iOS Audio Unit symbols. Keep all existing isolation/export flags.",
+  "local_validation": {
+    "python_tests": 8,
+    "link_fixture": "passed; subprocesses mocked, not an actual Apple linker invocation"
+  },
+  "pending": [
+    "Actual corrected iOS framework link",
+    "Godot 4 ARM64 compilation",
+    "IPA packaging and signing",
+    "Both engines and new tools on an iPhone"
+  ]
+}
