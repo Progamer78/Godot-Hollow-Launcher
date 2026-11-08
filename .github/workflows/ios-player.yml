@@ -17,7 +17,7 @@ permissions:
 jobs:
   export-and-build:
     runs-on: macos-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     env:
       SPINE_RUNTIME: ${{ inputs.spine_runtime || '4.2' }}
     steps:
@@ -57,6 +57,15 @@ jobs:
               out.write('revision=' + REVISIONS[version] + '\n')
           print('Selected bundled Spine runtime:', version)
           PY
+      - name: Checkout isolated Godot 3 runtime source
+        uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot
+          ref: a3378686f7196db78d7b3cc7947f72a13bc4864c # 3.6.3-stable
+          path: .cache/godot3-source
+          persist-credentials: false
+      - name: Export and execute original Godot 3 proof
+        run: python3 tools/desktop_proof3.py --download
       - name: Checkout official Spine module and C++ runtime
         if: env.SPINE_RUNTIME != 'none'
         uses: actions/checkout@v4
@@ -70,15 +79,26 @@ jobs:
             spine-cpp/spine-cpp
       - name: Stage bundled animation runtime
         run: python3 tools/prepare_spine.py .cache/godot-source .cache/spine-runtimes --version "$SPINE_RUNTIME"
+      - name: Stage Godot 3 animation runtime
+        run: python3 tools/prepare_spine.py .cache/godot3-source .cache/spine-runtimes --version "$SPINE_RUNTIME" --engine-major 3 --report build/spine3-build.json --notice build/SPINE3-RUNTIMES-LICENSE.txt
+      - name: Checkout trusted LimboAI runtime source
+        uses: actions/checkout@v4
+        with:
+          repository: limbonaut/limboai
+          ref: e45e60e976dafab7f2c15cc341ae366e4cf3352b # v1.8.1 / Godot 4.7.2
+          path: .cache/limboai
+          persist-credentials: false
       - name: Export and execute two independent PCKs
         run: python3 tools/desktop_proof.py "$(command -v godot)"
       - name: Test native pack inspector
         run: |
           swiftc -swift-version 5 ios/PCKInspector.swift tests/pck/main.swift -o build/pck-tests
-          build/pck-tests build/proof/movement.pck build/proof/counter.pck
-          swiftc -swift-version 5 ios/PCKInspector.swift ios/ControlProfile.swift ios/GameLibrary.swift tests/models/main.swift -o build/model-tests
+          build/pck-tests build/proof/movement.pck build/proof/counter.pck build/godot3-proof/godot3.pck
+          swiftc -swift-version 5 ios/PCKInspector.swift ios/ControlProfile.swift ios/ToolModels.swift ios/GameLibrary.swift tests/models/main.swift -o build/model-tests
           build/model-tests
           python3 -m unittest discover -s tests -v
+      - name: Stage legacy script compatibility and built-in AI runtime
+        run: python3 tools/prepare_compatibility.py .cache/godot-source .cache/limboai
       - name: Patch and verify player integration
         run: |
           python3 tools/patch_engine.py .cache/godot-source
@@ -100,6 +120,23 @@ jobs:
             -import-objc-header .cache/godot-source/drivers/apple_embedded/bridging_header_apple_embedded.h \
             .cache/godot-source/drivers/apple_embedded/*.swift \
             2>&1 | tee build/ios-typecheck.log
+      - name: Compile isolated Godot 3 framework
+        run: |
+          set -o pipefail
+          python3 tools/patch_godot3.py .cache/godot3-source
+          python3 -m venv .cache/scons3-env
+          .cache/scons3-env/bin/pip install scons==4.10.1
+          cd .cache/godot3-source
+          runtime3_flags=(platform=iphone target=release tools=no arch=arm64
+            module_arkit_enabled=no module_camera_enabled=no module_gdnative_enabled=no
+            lto=none optimize=size "CCFLAGS=-fvisibility=hidden -fvisibility-inlines-hidden"
+            -j"$(sysctl -n hw.logicalcpu)")
+          ../scons3-env/bin/scons "${runtime3_flags[@]}" platform/iphone/libiphone.iphone.opt.arm64.a \
+            2>&1 | tee ../../build/godot3-adapter-build.log
+          ../scons3-env/bin/scons "${runtime3_flags[@]}" 2>&1 | tee ../../build/godot3-build.log
+          cd ../..
+          python3 tools/build_godot3_framework.py .cache/godot3-source build/runtime3 \
+            2>&1 | tee build/godot3-link.log
       - name: Compile ARM64 runtime with external main-pack support
         run: |
           set -o pipefail
@@ -109,6 +146,10 @@ jobs:
           runtime_flags=(platform=ios target=template_release arch=arm64
             disable_path_overrides=no vulkan=no metal=yes opengl3=yes
             debug_symbols=no optimize=size -j"$(sysctl -n hw.logicalcpu)")
+          ../scons-env/bin/scons "${runtime_flags[@]}" \
+            bin/obj/modules/libmodule_player_tools.ios.template_release.arm64.a \
+            bin/obj/modules/libmodule_limboai.ios.template_release.arm64.a \
+            2>&1 | tee ../../build/compatibility-compile.log
           if [ "$SPINE_RUNTIME" != 'none' ]; then
             # Compile the new dependency first, reusing its objects below.
             ../scons-env/bin/scons "${runtime_flags[@]}" \
@@ -122,7 +163,7 @@ jobs:
           if [ "$SPINE_RUNTIME" != 'none' ]; then
             spine_notice=(--spine-license build/SPINE-RUNTIMES-LICENSE.txt)
           fi
-          python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a "${spine_notice[@]}"
+          python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a "${spine_notice[@]}" --compatibility-license build/COMPATIBILITY-LICENSES.txt
       - name: Build Xcode archive (unsigned)
         run: |
           set -o pipefail
@@ -138,6 +179,7 @@ jobs:
         run: |
           mkdir -p build/package/Payload
           cp -R build/ios/player.xcarchive/Products/Applications/*.app build/package/Payload/
+          python3 tools/install_godot3_framework.py build/package/Payload build/runtime3/Godot3Runtime.framework
           cd build/package
           zip -qr ../GodotPlayer-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
@@ -148,7 +190,14 @@ jobs:
             build/GodotPlayer-unsigned.ipa
             build/*.log
             build/spine-build.json
+            build/spine3-build.json
+            build/compatibility-build.json
+            build/COMPATIBILITY-LICENSES.txt
             build/SPINE-RUNTIMES-LICENSE.txt
+            build/runtime3/godot3-framework.json
+            build/godot3-proof/*.pck
+            build/godot3-proof/*.json
+            build/godot3-proof/*.log
             build/proof/*.pck
             build/proof/*.log
             build/proof/results.json
