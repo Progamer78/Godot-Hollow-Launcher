@@ -1,5 +1,15 @@
 # Validation recorded November 7, 2026
 
+## Spine build repair
+
+The latest supplied GitHub Actions logs passed all 256 PCK inspector checks, the control-profile migration/persistence/save-preservation tests, and iPhone Swift type-checking. Compilation stopped in the new Spine module on missing `callable_mp` and `RS` declarations, followed by cascading `SpineMesh2D` errors.
+
+A portable LLVM-MinGW compiler was downloaded into the workspace cache and verified against the official release SHA256. Actual compilation against the pinned Godot 4.7.2 sources then exposed additional API changes: rendering enum/type namespaces, animation-library `LocalVector` iteration, missing floating-point/scene-tree headers, and reference-counted JSON/format-loader allocation. The staging tool now adapts these in its copied module; it preserves upstream source files and the Spine 4.2 data version. JSON uses scoped references, and loader/saver references are explicitly released at module shutdown.
+
+The corrected module compiled and archived successfully for Windows x86_64, template_release: **100 object files**, zero compiler errors. A fresh run of the staging tool produced files identical to the compiled module (228 source/header/config/license files checked). Four Python tests pass with regression checks for the adaptation and unchanged source checkout. Logs, commands and the compiled archive are local under `build/spine-compile-proof/`; concise results are in `spine-build-fix.json`.
+
+The complete Godot 4.7.2 Windows release template also built successfully (546 seconds). It then executed the unchanged Mac Goodbye Eternity PCK for 90 headless frames: exit 0, zero script errors, zero missing-Spine-class errors, and the splash scene loaded. A temporary adjacent-PCK NTFS hard link was used because this desktop build retains the release default disabling CLI path overrides; the iOS workflow independently enables external `--main-pack`. No game files were modified. Certificate-store and shutdown object/resource leak messages remain; visual rendering, input and full gameplay were not tested. This establishes real C++ compilation and startup against Godot 4.7.2, rather than only source generation or the earlier 4.6.1 desktop test. The full iOS archive and device execution remain pending. The floating controls/menu source is unchanged by this repair.
+
 ## Floating menu and Spine update
 
 The user reports the preceding mouse/control update working on iPhone apart from the permanent toolbar. This update replaces it with a 44-point, translucent, movable menu handle, initially collapsed. The settings panel exists only when opened, and toggle changes close it. Gesture handlers attach before positioning so they do not acquire an invisible screen-sized drag region. Opening the panel does not resize the rendering view or saved-control canvas. UI compilation and touch behavior of this change remain untested on iPhone.

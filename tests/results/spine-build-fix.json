@@ -1,0 +1,38 @@
+{
+  "compatibility_revision": "godot-4.7-module-api-v1",
+  "engine": "Godot 4.7.2",
+  "spine": "4.2",
+  "spine_revision": "5cb78e77d3711ddcd80c7bd043bb11cf70fcc88c",
+  "target": "Windows x86_64, template_release",
+  "compiler": "LLVM-MinGW 20261104 (Clang)",
+  "compiled_objects": 100,
+  "archive_bytes": 1314454,
+  "archive_sha256": "f9eaeb3cb0d9c5f5d30a1915c7cbc26265d9f013c9949abc5e15e5ae1c3ae9f7",
+  "fresh_staging_matches_compiled_sources": true,
+  "python_tests_passed": 4,
+  "ios_swift_typecheck": "passed in supplied GitHub Actions logs",
+  "pck_inspector_checks_in_ci": 256,
+  "control_model_tests_in_ci": "passed",
+  "ios_archive": "not rebuilt yet",
+  "full_desktop_build": {
+    "exit_code": 0,
+    "seconds": 545.97
+  },
+  "game_startup": {
+    "exit_code": 0,
+    "timeout": false,
+    "seconds": 5.43,
+    "engine": "Locally compiled Godot 4.7.2 Windows template with adapted Spine 4.2",
+    "pack": "Goodbye_Eternity-v.0.14.1-macos1/Goodbye Eternity.app/Contents/Resources/Goodbye Eternity.pck",
+    "pack_modified": false,
+    "method": "NTFS hard link as adjacent PCK; Windows release template disables CLI path overrides. iOS workflow independently enables external main-pack.",
+    "script_errors": 0,
+    "missing_spine_class_errors": 0,
+    "limitations": [
+      "Headless startup only; no visual rendering, input, full gameplay or iPhone execution tested.",
+      "Certificate-store error and shutdown object/resource leaks remain in log."
+    ]
+  },
+  "ios_ipa_produced": false,
+  "godot3": "Adapter boundary retained; Godot 3 runtime not implemented or tested."
+}

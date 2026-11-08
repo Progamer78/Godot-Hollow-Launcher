@@ -21,6 +21,79 @@ REQUIRED_CLASSES = (
     "SpineSprite", "SpineAnimation", "SpineAnimationState", "SpineTrackEntry",
     "SpineSkeleton", "SpineSkeletonDataResource",
 )
+COMPATIBILITY_REVISION = "godot-4.7-module-api-v1"
+
+
+def adapt_godot47(module):
+    # Godot 4.7 removed transitive includes and moved rendering constants/types
+    # out of RenderingServer. Adapt only our staged built-in module, preserving
+    # the pinned upstream checkout and the Spine 4.2 animation/data format.
+    common = module / "SpineCommon.h"
+    text = common.read_text(encoding="utf-8")
+    anchor = '#include "core/error/error_macros.h"'
+    if text.count(anchor) != 1:
+        raise RuntimeError("Unexpected SpineCommon.h layout for Godot header adaptation.")
+    text = text.replace(anchor, anchor + '\n#include <cfloat>\n#include "core/object/callable_mp.h"\n#include "core/templates/local_vector.h"\n#include "scene/main/scene_tree.h"\n#include "servers/rendering/rendering_server.h"')
+    common.write_text(text, encoding="utf-8")
+    replacements = {
+        "get_singleton": "RenderingServer::get_singleton",
+        "SurfaceData": "RenderingServerTypes::SurfaceData",
+        "ARRAY_COLOR": "RenderingServerEnums::ARRAY_COLOR",
+        "ARRAY_MAX": "RenderingServerEnums::ARRAY_MAX",
+        "ARRAY_TEX_UV": "RenderingServerEnums::ARRAY_TEX_UV",
+        "ARRAY_VERTEX": "RenderingServerEnums::ARRAY_VERTEX",
+        "ArrayFormat": "RenderingServerEnums::ArrayFormat",
+        "PrimitiveType": "RenderingServerEnums::PrimitiveType",
+    }
+    for path in sorted(module.iterdir()):
+        if path.suffix not in (".cpp", ".h"):
+            continue
+        text = path.read_text(encoding="utf-8")
+        def replace(match):
+            name = match.group(1)
+            if name not in replacements:
+                raise RuntimeError(f"Unmapped Spine rendering API in {path.name}: RS::{name}")
+            return replacements[name]
+        updated = re.sub(r"\bRS::(\w+)", replace, text)
+        updated = updated.replace("RenderingServer::get_singleton()->free(", "RenderingServer::get_singleton()->free_rid(")
+        if path.name == "SpineAnimationTrack.cpp":
+            old = ("List<StringName> animation_libraries;\n"
+                   "\t\tanimation_player->get_animation_library_list(&animation_libraries);\n"
+                   "\t\tfor (auto iter = animation_libraries.front(); iter; iter = iter->next()) {\n"
+                   "\t\t\tanimation_player->remove_animation_library(iter->get());\n\t\t}")
+            new = ("LocalVector<StringName> animation_libraries;\n"
+                   "\t\tanimation_player->get_animation_library_list(&animation_libraries);\n"
+                   "\t\tfor (const StringName &name : animation_libraries) {\n"
+                   "\t\t\tanimation_player->remove_animation_library(name);\n\t\t}")
+            if updated.count(old) != 1:
+                raise RuntimeError("Unexpected Spine animation-library enumeration for Godot 4.7.")
+            updated = updated.replace(old, new)
+        if path.name == "SpineAtlasResource.cpp":
+            # JSON is RefCounted; memnew returns Ref<JSON> in Godot 4.7.
+            if updated.count("JSON *json = memnew(JSON);") != 2 or updated.count("memdelete(json);") != 3:
+                raise RuntimeError("Unexpected Spine atlas JSON ownership for Godot 4.7.")
+            updated = updated.replace("JSON *json = memnew(JSON);", "Ref<JSON> json;\n\tjson.instantiate();")
+            updated = updated.replace("memdelete(json);", "// JSON is released by its Ref when this scope ends.")
+        if path.name == "register_types.cpp":
+            # Keep strong references while registered, and release them during
+            # module shutdown rather than from process-global destructors.
+            loaders = {
+                "atlas_loader": ("SpineAtlasResourceFormatLoader", "ResourceLoader", "loader"),
+                "atlas_saver": ("SpineAtlasResourceFormatSaver", "ResourceSaver", "saver"),
+                "skeleton_file_loader": ("SpineSkeletonFileResourceFormatLoader", "ResourceLoader", "loader"),
+                "skeleton_file_saver": ("SpineSkeletonFileResourceFormatSaver", "ResourceSaver", "saver"),
+            }
+            for variable, (kind, server, role) in loaders.items():
+                old = f"static {kind} *{variable};"
+                if updated.count(old) != 1:
+                    raise RuntimeError(f"Unexpected Spine registration ownership: {variable}")
+                updated = updated.replace(old, f"static Ref<{kind}> {variable};")
+                old = f"{server}::remove_resource_format_{role}({variable});"
+                if updated.count(old) != 1:
+                    raise RuntimeError(f"Unexpected Spine shutdown ownership: {variable}")
+                updated = updated.replace(old, old + f"\n\t{variable}.unref();")
+        if updated != text:
+            path.write_text(updated, encoding="utf-8")
 
 
 def prepare(engine, source, version, report, notice, *, verify_revision=True):
@@ -56,6 +129,7 @@ def prepare(engine, source, version, report, notice, *, verify_revision=True):
             raise RuntimeError("Official Spine runtime license is missing.")
         shutil.copytree(module, target)
         shutil.copytree(cpp, target / "spine-cpp")
+        adapt_godot47(target)
         # Upstream places the module beside its engine checkout. We put it in
         # modules/ so Godot's normal module discovery and registration apply.
         (target / "SCsub").write_text(scsub.replace(old_include, "#modules/spine_godot/spine-cpp/include"), encoding="utf-8")
@@ -63,9 +137,12 @@ def prepare(engine, source, version, report, notice, *, verify_revision=True):
         notice.parent.mkdir(parents=True, exist_ok=True)
         notice.write_text(license_text, encoding="utf-8")
         metadata["classes"] = list(REQUIRED_CLASSES)
+        metadata["godot_compatibility"] = COMPATIBILITY_REVISION
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     print(f"Bundled Spine: {version} ({REVISIONS[version] or 'disabled'})")
+    if version != "none":
+        print(f"Spine engine adaptation: {COMPATIBILITY_REVISION}")
     return metadata
 
 

@@ -102,7 +102,19 @@ class BuildToolsTests(unittest.TestCase):
             source = root / "source"
             module_dir = source / "spine-godot/spine_godot"
             module_dir.mkdir(parents=True)
-            (module_dir / "register_types.cpp").write_text("\n".join("GDREGISTER_CLASS(" + c + ");" for c in tool.REQUIRED_CLASSES))
+            registry = "\n".join("GDREGISTER_CLASS(" + c + ");" for c in tool.REQUIRED_CLASSES)
+            for kind, name, server, role in [
+                ("SpineAtlasResourceFormatLoader", "atlas_loader", "ResourceLoader", "loader"),
+                ("SpineAtlasResourceFormatSaver", "atlas_saver", "ResourceSaver", "saver"),
+                ("SpineSkeletonFileResourceFormatLoader", "skeleton_file_loader", "ResourceLoader", "loader"),
+                ("SpineSkeletonFileResourceFormatSaver", "skeleton_file_saver", "ResourceSaver", "saver"),
+            ]:
+                registry += f"\nstatic {kind} *{name};\n{server}::remove_resource_format_{role}({name});"
+            (module_dir / "register_types.cpp").write_text(registry)
+            (module_dir / "SpineCommon.h").write_text('#include "core/error/error_macros.h"\n')
+            (module_dir / "SpineSprite.h").write_text("uint32_t offsets[RS::ARRAY_MAX];\nRS::SurfaceData data;\nRS::ArrayFormat format;\nRS::get_singleton();\n")
+            (module_dir / "SpineAnimationTrack.cpp").write_text("List<StringName> animation_libraries;\n\t\tanimation_player->get_animation_library_list(&animation_libraries);\n\t\tfor (auto iter = animation_libraries.front(); iter; iter = iter->next()) {\n\t\t\tanimation_player->remove_animation_library(iter->get());\n\t\t}")
+            (module_dir / "SpineAtlasResource.cpp").write_text("JSON *json = memnew(JSON);\nmemdelete(json);\nmemdelete(json);\nJSON *json = memnew(JSON);\nmemdelete(json);")
             (module_dir / "SCsub").write_text('env.Append(CPPPATH=["#../spine_godot/spine-cpp/include"])\nenv_spine_runtime.Append(CPPPATH=["#../spine_godot/spine-cpp/include"])')
             header = source / "spine-cpp/spine-cpp/include/spine/Version.h"
             header.parent.mkdir(parents=True)
@@ -117,6 +129,18 @@ class BuildToolsTests(unittest.TestCase):
             self.assertEqual((installed / "LICENSE").read_text(), license_text)
             self.assertEqual(notice.read_text(), license_text)
             self.assertEqual((installed / "SCsub").read_text().count("#modules/spine_godot/spine-cpp/include"), 2)
+            self.assertIn('#include "core/object/callable_mp.h"', (installed / "SpineCommon.h").read_text())
+            self.assertIn('#include "servers/rendering/rendering_server.h"', (installed / "SpineCommon.h").read_text())
+            adapted = (installed / "SpineSprite.h").read_text()
+            self.assertIn("RenderingServerEnums::ARRAY_MAX", adapted)
+            self.assertIn("RenderingServerTypes::SurfaceData", adapted)
+            self.assertIn("RenderingServerEnums::ArrayFormat", adapted)
+            self.assertIn("RenderingServer::get_singleton()", adapted)
+            self.assertNotIn("RS::", adapted)
+            self.assertIn("RS::ARRAY_MAX", (module_dir / "SpineSprite.h").read_text())
+            self.assertIn("LocalVector<StringName> animation_libraries", (installed / "SpineAnimationTrack.cpp").read_text())
+            self.assertNotIn("memdelete(json)", (installed / "SpineAtlasResource.cpp").read_text())
+            self.assertEqual((installed / "register_types.cpp").read_text().count(".unref();"), 4)
             with self.assertRaises(RuntimeError):
                 tool.prepare(engine, source, "4.2", report, notice, verify_revision=False)
             with self.assertRaises(RuntimeError):
