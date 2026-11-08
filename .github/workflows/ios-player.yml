@@ -20,6 +20,15 @@ jobs:
           version: '4.7.2'
           use-dotnet: false
           include-templates: true
+      - name: Export Xcode project using the working reference pipeline
+        run: |
+          set -o pipefail
+          mkdir -p build/ios
+          godot --headless --path bootstrap --editor --import 2>&1 | tee build/bootstrap-import.log
+          godot --headless --path bootstrap --export-release iOS "$PWD/build/ios/player.xcodeproj" \
+            2>&1 | tee build/ios-export.log
+          test -f build/ios/player.xcodeproj/project.pbxproj
+          test -f build/ios/player.xcframework/ios-arm64/libgodot.a
       - name: Checkout official engine release
         uses: actions/checkout@v4
         with:
@@ -65,12 +74,8 @@ jobs:
             disable_path_overrides=no vulkan=no metal=yes opengl3=yes \
             debug_symbols=no optimize=size -j"$(sysctl -n hw.logicalcpu)" \
             2>&1 | tee ../../build/runtime-build.log
-      - name: Export Xcode project using the working reference pipeline
-        run: |
-          mkdir -p build/ios
-          godot --headless --path bootstrap --editor --import
-          godot --headless --path bootstrap --export-release iOS "$PWD/build/ios/player.xcodeproj"
-          python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a
+      - name: Install player runtime into exported Xcode project
+        run: python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a
       - name: Build Xcode archive (unsigned)
         run: |
           set -o pipefail
