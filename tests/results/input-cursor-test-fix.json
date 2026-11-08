@@ -1,0 +1,30 @@
+{
+  "failure": "Simulator required a CADisplayLink callback within 0.8 seconds; none arrived",
+  "supplied_simulator_checks_passed": [
+    "Shared lifetime selector audit",
+    "100 control creation/removal cycles",
+    "Idle joystick layout",
+    "Direct Unicode and Backspace",
+    "Bounded Unicode paste",
+    "Global input release"
+  ],
+  "repair": [
+    "Shared cursor updater called on view attachment and display callbacks",
+    "Test invokes actual cursor updater directly and checks position/visibility/revision reads and view state",
+    "Removed fixed display-frame deadline",
+    "Added per-phase progress messages"
+  ],
+  "scope": "Does not claim verified display-frame scheduling, real engine input or device game execution",
+  "local_checks": {
+    "python_native_passed": 21,
+    "skipped": 0,
+    "swift_syntax_files": 20
+  },
+  "corrected_simulator_test_executed_locally": false,
+  "new_ipa_produced_locally": false,
+  "sha256": {
+    "ios/InputViews.swift": "de5d33b719fa82dfe399e694176c2cbda605c11fc448dbfb917097a4235fe466",
+    "tests/input-ui/main.swift": "9b05bb99155cda37cc6b0f08d33645d26c3c59a57b6a611ab0422264c6b25472",
+    "tools/check_input_ui.py": "8456dd55dada9d1c07508aa9b7755f8c4d1fe964c99c0af6a83b76d3ecb45bca"
+  }
+}

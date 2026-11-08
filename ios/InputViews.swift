@@ -139,6 +139,7 @@ final class MouseTouchView: UIView {
         super.didMoveToWindow()
         if window == nil { stop() }
         else if displayLink == nil {
+            updateCursor()
             let link = CADisplayLink(target: self, selector: #selector(refreshCursor(_:)))
             link.preferredFramesPerSecond = 30
             link.add(to: .main, forMode: .common)
@@ -152,6 +153,11 @@ final class MouseTouchView: UIView {
         tracking = false
     }
     @objc private func refreshCursor(_ link: CADisplayLink) {
+        updateCursor()
+    }
+    // Also take an initial snapshot on attachment. Cursor state is useful even
+    // before the display scheduler delivers the first animation callback.
+    func updateCursor() {
         let revision = PlayerRuntime.mouseCursorRevision()
         if revision != cursorRevision {
             cursorRevision = revision

@@ -1,0 +1,29 @@
+{
+  "failure": "Simulator audit wrongly rejected compiler-generated dealloc; shutdown timeout then hid the original result",
+  "supplied_logs_verified": [
+    "Complete iPhone Swift type-check",
+    "Optimized standalone iPhone archive bridge linked",
+    "Simulator input app compiled, installed and launched"
+  ],
+  "repair": [
+    "Permit generated dealloc in runtime metadata audit",
+    "Keep release/retain/autorelease/retainCount checks and source callback audit",
+    "Run shared audit on macOS before simulator boot",
+    "Cleanup timeouts cannot hide test result; delete still attempted"
+  ],
+  "local_checks": {
+    "python_native_passed": 21,
+    "skipped": 0,
+    "swift_syntax_files": 20
+  },
+  "corrected_native_mac_and_simulator_tests_executed_locally": false,
+  "new_ipa_produced_locally": false,
+  "sha256": {
+    ".github/workflows/ios-player.yml": "e99f21e66a543e22486f02b5640887757ae6d11bdfde4717140a115af8e08d1f",
+    "tools/check_input_ui.py": "9826e3feff7dbc53869af43c7531757d08dd08fb636301cc1b08c1d6696541d9",
+    "tests/input-ui/main.swift": "5f8678506c2d6605b2c7450f5f7421e48e31111c27c24e609569743467e7f552",
+    "tests/input-ui/LifetimeAudit.swift": "9a34d18dbd37b926c260a4abbab85f2f846af601c0800687e2521cdafd703493",
+    "tests/objc-lifetime/main.swift": "056943f42f5cea6f8bfdfa924ff54dfee5556ce7608bbb1eb3581e8c1cc3a4ba",
+    "tests/test_input_ui.py": "dc96224e3a6527cabbc4a1f9899ec744138d90e46f2599d0fd104afdda569087"
+  }
+}

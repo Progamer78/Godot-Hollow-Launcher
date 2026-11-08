@@ -78,7 +78,7 @@ def run(output):
         if result.returncode or "PLAYER_INPUT_UI_PASS" not in log or "PLAYER_INPUT_UI_FAIL" in log:
             raise RuntimeError("Input UIKit smoke test failed; see input-ui/run.log.")
         (output / "results.json").write_text(json.dumps({"passed": True, "runtime": runtime, "sources": files,
-              "scope": "Actual UIKit controls/keyboard; recorded engine endpoints, no Godot runtime"}, indent=2) + "\n")
+              "scope": "Actual UIKit controls/keyboard/cursor updates; recorded engine endpoints, no Godot runtime or display-frame timing guarantee"}, indent=2) + "\n")
     finally:
         cleanup_device(device)
 

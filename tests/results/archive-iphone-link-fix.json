@@ -1,0 +1,31 @@
+{
+  "failure": "Undefined std::__1::__allocator_destroy for PlayerArchive::Entry in final Xcode ARM64 app link",
+  "supplied_ci_verified": [
+    "266 PCK checks",
+    "Full Swift model/save/archive tests",
+    "Swift APK packer and generated PCK input/animation/save execution",
+    "Complete iPhone Swift type-check",
+    "Both ARM64 engine archives compiled",
+    "Godot 3 framework link and isolation audits"
+  ],
+  "changes": [
+    "Scoped textual C++ compilation for ArchiveSupport.mm",
+    "Explicit public memory include",
+    "Early strict iPhone bridge link before engine builds",
+    "Desktop archive checks match size optimization and disabled exceptions/modules"
+  ],
+  "local_helper_tests": {
+    "passed": 17,
+    "skipped": 0
+  },
+  "ios_repaired_link_verified": false,
+  "ipa_produced_locally": false,
+  "compiler_root_cause": "Modular template instantiation path inferred; Apple toolchain unavailable locally",
+  "source_sha256": {
+    "ios/ArchiveSupport.mm": "ba796560be502ddde2a990520deb98ebe4c04741c6ce4d04602f030f9a02cd18",
+    "tools/patch_engine.py": "e6c04ba6694b2606b11736cc2691c78d3dc5a08a1137363216253bd7dc9b2d6e",
+    "tools/check_ios_archive_link.py": "4e49128b02f28f1f3c06e92ac4daaedd7a315a8b93358999f14e9da3909df1ed",
+    "tools/build_archive_support.py": "fbeab2f2cbe798d7865a8d98194291af5521f7a1fae8edfce4c34de1aad3544f",
+    ".github/workflows/ios-player.yml": "98d75ea6ddb8d1d6f4d9df2e23e8963f1eac1d01067c48137985557d0ece6c23"
+  }
+}

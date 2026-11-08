@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-08",
+  "user_log": "Errors/player.log",
+  "native_crash_stack_present": false,
+  "source_defect": "KeyButton exposed a release Objective-C selector, colliding with NSObject object lifetime operations",
+  "old_package_callback_audit": "reproduced forbidden release in GodotPlayer-Features-APK-Fixed3.zip",
+  "new_package_callback_audit": "passed",
+  "changes": [
+    "Rename callback to resetHeldInputs",
+    "Gate mouse view and native input/cursor access on completed startup",
+    "Cancel mouse touches on focus/input release",
+    "Preserve joystick state through UI refreshes and avoid idle virtual-pad events",
+    "Direct system keyboard with compact accessory and Unicode/IME handling"
+  ],
+  "local_tests": {
+    "python_native_passed": 19,
+    "skipped": 0,
+    "swift_syntax_files": 18
+  },
+  "configured_ios_simulator_checks": [
+    "Real input-view runtime method audit",
+    "100 button lifetime cycles",
+    "Idle analog joystick layout",
+    "Mouse display-link polling",
+    "Direct committed Unicode",
+    "Backspace",
+    "Bounded Unicode paste",
+    "Release all input state"
+  ],
+  "simulator_test_executed_locally": false,
+  "iphone_swift_compile_executed_locally": false,
+  "device_crash_resolution_verified": false,
+  "new_ipa_produced_locally": false,
+  "separate_log_issue": "Game has Spine 4.3.08 data but installed player bundles 4.2; select matching 4.3 workflow version for those animations",
+  "sha256": {
+    ".github/workflows/ios-player.yml": "af7cdcf84ef2e2ae7fbee83ec35d1031ee919a8aedfc8c2e4bab0c00412ca2ee",
+    "ios/GameControls.swift": "1c29589b7cf825fae875d343e960901a5166d3fb4d9eb53aeaabc0df89f26536",
+    "ios/GameInput.swift": "1de793534d18709439fa15baf5cacce549266695d579ffc25322fdefb02e3e05",
+    "ios/InputViews.swift": "1431bf08a8b1aaddba49b16ac76aa791440a4e0aad8e6f5a84cba6d60bf454ba",
+    "ios/KeyboardInput.swift": "4f59f874ec983d1ff7869c6a37556816a9911a1d0103e1962f61a54e3be821cc",
+    "ios/Joystick.swift": "2387b5de514ce505b410e11057dad67d2c13ed19a3f9e62c9ef2ab5ada749da5",
+    "ios/player_runtime.mm": "4466d6a66df17e655ee1187525830fe3520bae45a2527014bcda3940aefc96db",
+    "tools/patch_engine.py": "aea2cde4a2b0b579f5f0d5385129b7cb36aac3bdb34f8775f6e0d3b8d6933070",
+    "tools/check_input_ui.py": "21a2e87aec7f771306221e9336f6235c609bcbcee8ec339d84074039f468030d",
+    "tests/input-ui/main.swift": "8840c161327a78feb568930ad8252f66c9770f6b59fd76ef27f5c601544d1216",
+    "tests/test_input_ui.py": "454eab8130cfacd59e91f5857697c2eb510adff94d467aea0b5f68b59b7d8f30",
+    "tests/test_build_tools.py": "960169ba1f8733c6fbc02d43e07ae4b960f095dbc8f2bb23f2eab8c7c93c461f"
+  }
+}
