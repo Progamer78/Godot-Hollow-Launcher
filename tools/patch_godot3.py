@@ -44,8 +44,8 @@ def patch(engine):
     scsub = ios / "SCsub"
     for name in ["main.m", "godot_app_delegate.m", "godot_scene_delegate.m"]:
         replace(scsub, f'    "{name}",\n', "")
-    replace(scsub, '    "godot_iphone.mm",', '    "godot_iphone.mm",\n    "player3_runtime.mm",')
-    for name in ["Godot3API.h", "player3_runtime.mm"]:
+    replace(scsub, '    "godot_iphone.mm",', '    "godot_iphone.mm",\n    "player3_runtime.mm",\n    "player3_plugins.cpp",')
+    for name in ["Godot3API.h", "player3_runtime.mm", "player3_plugins.cpp"]:
         shutil.copy2(ROOT / ("ios" if name.endswith(".h") else "runtime3") / name, ios / name)
     delegate = ios / "app_delegate.mm"
     replace(delegate, '#import "app_delegate.h"', '#import "app_delegate.h"\nextern NSString *gp3_save_path;')

@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 import plistlib
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -18,6 +20,46 @@ def module(name):
 
 
 class BuildToolsTests(unittest.TestCase):
+    def test_godot3_ios_plugin_callbacks_link(self):
+        # Exercise the real C++ ABI and ARM64 Mach-O linker, including a
+        # negative control that reproduces the two missing export callbacks.
+        if sys.platform == "darwin":
+            compiler = ["xcrun", "--sdk", "iphoneos", "clang++"]
+            sdk = subprocess.check_output(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"], text=True).strip()
+            flags = ["-target", "arm64-apple-ios15.0", "-isysroot", sdk]
+            linker = compiler + flags + ["-dynamiclib", "-Wl,-install_name,@rpath/PluginHooksProof.dylib"]
+            nm = ["xcrun", "nm", "-u"]
+        else:
+            tools = ROOT / ".cache/llvm-mingw-20261104-ucrt-x86_64/bin"
+            if not (tools / "clang++.exe").is_file():
+                self.skipTest("ARM64 Mach-O compiler/linker unavailable")
+            compiler = [str(tools / "clang++.exe")]
+            flags = ["-target", "arm64-apple-ios15.0"]
+            linker = [str(tools / "ld.lld.exe"), "-flavor", "darwin", "-dylib", "-arch", "arm64", "-platform_version", "ios", "15.0", "15.0", "-install_name", "@rpath/PluginHooksProof.dylib"]
+            nm = [str(tools / "llvm-nm.exe"), "--undefined-only"]
+        engine = ROOT / ".cache/godot3-source"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            api = root / "api"
+            api.mkdir()
+            for name in ["api.h", "api.cpp"]:
+                if (engine / "platform/iphone/api" / name).is_file():
+                    shutil.copy2(engine / "platform/iphone/api" / name, api / name)
+                else:
+                    with zipfile.ZipFile(ROOT / ".cache/godot3-source.zip") as archive:
+                        (api / name).write_bytes(archive.read("godot-3.6.3-stable/platform/iphone/api/" + name))
+            objects = [root / "api.o", root / "plugins.o"]
+            sources = [api / "api.cpp", ROOT / "runtime3/player3_plugins.cpp"]
+            for source, obj in zip(sources, objects):
+                subprocess.run(compiler + flags + ["-DIPHONE_ENABLED", "-fvisibility=hidden", "-I", str(root), "-c", str(source), "-o", str(obj)], check=True, capture_output=True, text=True)
+            image = root / "PluginHooksProof.dylib"
+            failed = subprocess.run(linker + [str(objects[0]), "-o", str(image)], capture_output=True, text=True)
+            self.assertNotEqual(failed.returncode, 0, "The unchanged API must fail without export callbacks")
+            self.assertIn("godot_ios_plugins_initialize", failed.stderr)
+            self.assertIn("godot_ios_plugins_deinitialize", failed.stderr)
+            subprocess.run(linker + [str(obj) for obj in objects] + ["-o", str(image)], check=True, capture_output=True, text=True)
+            self.assertEqual(subprocess.check_output(nm + [str(image)], text=True).strip(), "", "Both callbacks must resolve without host-engine symbols")
+
     def test_godot3_framework_link_and_audits(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -114,6 +156,8 @@ class BuildToolsTests(unittest.TestCase):
             ios = target / "platform/iphone"
             self.assertNotIn('"main.m"', (ios / "SCsub").read_text())
             self.assertIn('"player3_runtime.mm"', (ios / "SCsub").read_text())
+            self.assertIn('"player3_plugins.cpp"', (ios / "SCsub").read_text())
+            self.assertEqual((ios / "player3_plugins.cpp").read_bytes(), (ROOT / "runtime3/player3_plugins.cpp").read_bytes())
             self.assertNotIn("exit(0)", (ios / "app_delegate.mm").read_text())
             self.assertIn("gp3_save_path", (ios / "app_delegate.mm").read_text())
             self.assertIn("gp3_main_started = Main::start()", (ios / "os_iphone.mm").read_text())
