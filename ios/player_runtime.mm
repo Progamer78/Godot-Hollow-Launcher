@@ -2,10 +2,13 @@
 #import "app_delegate_service.h"
 #import "godot_app_delegate.h"
 #import "godot_view_controller.h"
+#import "godot_view_apple_embedded.h"
+#include "drivers/apple_embedded/display_server_apple_embedded.h"
 #include "core/input/input.h"
 #include "core/input/input_event.h"
 #include "core/os/keyboard.h"
 #include "core/config/project_settings.h"
+#import <QuartzCore/QuartzCore.h>
 
 @interface GDTAppDelegateService (PlayerStart)
 - (BOOL)startPlayerWithArguments:(NSArray<NSString *> *)arguments;
@@ -15,7 +18,24 @@
 NSString *player_save_path = nil;
 BOOL player_engine_ready = NO;
 static BOOL attempted = NO;
-static NSMutableSet<NSString *> *held_keys;
+static NSMutableDictionary<NSString *, NSNumber *> *held_keys;
+static NSMutableDictionary<NSNumber *, NSNumber *> *held_mouse;
+static BitField<MouseButtonMask> mouse_buttons;
+static BOOL mouse_enabled = NO;
+static bool previous_mouse_from_touch = false;
+static bool previous_touch_from_mouse = false;
+static CFTimeInterval last_motion = 0;
+static CFTimeInterval last_left_click = 0;
+static Vector2 last_click_position;
+
+static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
+    NSInteger count = [holds[key] integerValue];
+    if (pressed) { holds[key] = @(count + 1); return count == 0; }
+    if (count <= 0) return false;
+    if (count == 1) { [holds removeObjectForKey:key]; return true; }
+    holds[key] = @(count - 1);
+    return false;
+}
 
 @implementation PlayerRuntime
 + (UIViewController *)startPack:(NSString *)packPath savePath:(NSString *)savePath renderer:(NSString *)renderer error:(NSError **)error {
@@ -29,7 +49,8 @@ static NSMutableSet<NSString *> *held_keys;
     }
     attempted = YES;
     player_save_path = [savePath copy];
-    held_keys = [NSMutableSet new];
+    held_keys = [NSMutableDictionary new];
+    held_mouse = [NSMutableDictionary new];
     NSMutableArray<NSString *> *arguments = [NSMutableArray arrayWithArray:@[
         NSBundle.mainBundle.executablePath, @"--main-pack", packPath,
         @"--log-file", [savePath stringByAppendingPathComponent:@"player.log"]
@@ -60,33 +81,181 @@ static NSMutableSet<NSString *> *held_keys;
 
 + (void)setKey:(NSString *)key pressed:(BOOL)pressed {
     if (!Input::get_singleton() || !held_keys) return;
-    if (pressed == [held_keys containsObject:key]) return;
-    Key code = Key::NONE;
-    if ([key isEqualToString:@"Up"]) code = Key::UP;
-    else if ([key isEqualToString:@"Down"]) code = Key::DOWN;
-    else if ([key isEqualToString:@"Left"]) code = Key::LEFT;
-    else if ([key isEqualToString:@"Right"]) code = Key::RIGHT;
-    else if ([key isEqualToString:@"Enter"]) code = Key::ENTER;
-    else if ([key isEqualToString:@"Escape"]) code = Key::ESCAPE;
-    else if ([key isEqualToString:@"Space"]) code = Key::SPACE;
-    else if ([key isEqualToString:@"Shift"]) code = Key::SHIFT;
-    else if ([key isEqualToString:@"Control"]) code = Key::CTRL;
-    else if ([key isEqualToString:@"Tab"]) code = Key::TAB;
-    else if (key.length == 1) code = (Key)[key.uppercaseString characterAtIndex:0];
+    if ([key isEqualToString:@"Mouse Left"]) { [self setMouseButton:1 pressed:pressed]; return; }
+    if ([key isEqualToString:@"Mouse Right"]) { [self setMouseButton:2 pressed:pressed]; return; }
+    if ([key isEqualToString:@"Mouse Middle"]) { [self setMouseButton:3 pressed:pressed]; return; }
+    NSString *name = [key isEqualToString:@"Control"] ? @"Ctrl" : key;
+    Key code = find_keycode(String::utf8([name UTF8String]));
+    if (key.length == 1) code = (Key)[key.uppercaseString characterAtIndex:0];
     if (code == Key::NONE) return;
-    if (pressed) [held_keys addObject:key]; else [held_keys removeObject:key];
+    if (!change_hold(held_keys, key, pressed)) return;
     Ref<InputEventKey> event;
     event.instantiate();
     event->set_keycode(code);
     event->set_physical_keycode(code);
+    event->set_key_label(code);
     event->set_pressed(pressed);
-    event->set_shift_pressed([held_keys containsObject:@"Shift"]);
-    event->set_ctrl_pressed([held_keys containsObject:@"Control"]);
-    if (key.length == 1) event->set_unicode([key characterAtIndex:0]);
+    event->set_shift_pressed(held_keys[@"Shift"] != nil);
+    event->set_ctrl_pressed(held_keys[@"Control"] != nil);
+    event->set_alt_pressed(held_keys[@"Alt"] != nil);
+    event->set_meta_pressed(held_keys[@"Meta"] != nil);
+    if (key.length == 1) {
+        NSString *text = held_keys[@"Shift"] ? key.uppercaseString : key.lowercaseString;
+        event->set_unicode([text characterAtIndex:0]);
+    } else if (code == Key::SPACE) {
+        event->set_unicode(' ');
+    }
     Input::get_singleton()->parse_input_event(event);
 }
 
 + (void)releaseKeys {
-    for (NSString *key in [held_keys allObjects]) [self setKey:key pressed:NO];
+    for (NSString *key in [held_keys allKeys]) { held_keys[key] = @1; [self setKey:key pressed:NO]; }
+    for (NSNumber *button in [held_mouse allKeys]) { held_mouse[button] = @1; [self setMouseButton:button.integerValue pressed:NO]; }
+}
+
++ (void)setMouseEnabled:(BOOL)enabled {
+    Input *input = Input::get_singleton();
+    if (!input) return;
+    if (mouse_enabled == enabled) {
+        if (enabled) {
+            input->set_emulate_mouse_from_touch(false);
+            input->set_emulate_touch_from_mouse(false);
+        }
+        return;
+    }
+    [self releaseKeys];
+    mouse_enabled = enabled;
+    if (enabled) {
+        last_motion = 0;
+        previous_mouse_from_touch = input->is_emulating_mouse_from_touch();
+        previous_touch_from_mouse = input->is_emulating_touch_from_mouse();
+        input->set_emulate_mouse_from_touch(false);
+        input->set_emulate_touch_from_mouse(false);
+        UIView *view = GDTAppDelegateService.viewController.godotView;
+        input->set_mouse_position(Vector2(view.bounds.size.width * view.contentScaleFactor / 2, view.bounds.size.height * view.contentScaleFactor / 2));
+    } else {
+        input->set_emulate_mouse_from_touch(previous_mouse_from_touch);
+        input->set_emulate_touch_from_mouse(previous_touch_from_mouse);
+    }
+}
+
++ (void)moveMouse:(CGPoint)point fromView:(UIView *)source relative:(BOOL)relative {
+    Input *input = Input::get_singleton();
+    if (!input || !mouse_enabled) return;
+    UIView *view = GDTAppDelegateService.viewController.godotView;
+    if (!view || view.contentScaleFactor <= 0) return;
+    CGFloat scale = view.contentScaleFactor;
+    Vector2 old = input->get_mouse_position();
+    CGPoint mapped = relative ? point : [view convertPoint:point fromView:source];
+    Vector2 delta = relative ? Vector2(mapped.x * scale, mapped.y * scale) : Vector2(mapped.x * scale, mapped.y * scale) - old;
+    Vector2 position = old + delta;
+    if ([self mouseCaptured]) {
+        position = Vector2(view.bounds.size.width * scale / 2, view.bounds.size.height * scale / 2);
+    } else {
+        position.x = CLAMP(position.x, 0, MAX(0, view.bounds.size.width * scale - 1));
+        position.y = CLAMP(position.y, 0, MAX(0, view.bounds.size.height * scale - 1));
+        delta = position - old;
+    }
+    Ref<InputEventMouseMotion> event;
+    event.instantiate();
+    event->set_position(position);
+    event->set_global_position(position);
+    event->set_relative(delta);
+    event->set_relative_screen_position(delta);
+    CFTimeInterval now = CACurrentMediaTime();
+    Vector2 velocity = last_motion > 0 ? delta / MAX(0.001, now - last_motion) : Vector2();
+    event->set_velocity(velocity);
+    event->set_screen_velocity(velocity);
+    last_motion = now;
+    event->set_button_mask(mouse_buttons);
+    input->set_mouse_position(position);
+    input->parse_input_event(event);
+}
+
++ (CGPoint)mousePositionInView:(UIView *)target {
+    Input *input = Input::get_singleton();
+    if (!input) return CGPointZero;
+    UIView *view = GDTAppDelegateService.viewController.godotView;
+    if (!view || view.contentScaleFactor <= 0) return CGPointZero;
+    Vector2 position = input->get_mouse_position();
+    return [target convertPoint:CGPointMake(position.x / view.contentScaleFactor, position.y / view.contentScaleFactor) fromView:view];
+}
+
++ (void)setMouseButton:(NSInteger)button pressed:(BOOL)pressed {
+    Input *input = Input::get_singleton();
+    if (!input || button < 1 || button > 3 || !held_mouse) return;
+    if (!change_hold(held_mouse, @(button), pressed)) return;
+    MouseButton value = (MouseButton)button;
+    if (pressed) mouse_buttons.set_flag(mouse_button_to_mask(value)); else mouse_buttons.clear_flag(mouse_button_to_mask(value));
+    Ref<InputEventMouseButton> event;
+    event.instantiate();
+    event->set_button_index(value);
+    event->set_pressed(pressed);
+    event->set_button_mask(mouse_buttons);
+    event->set_position(input->get_mouse_position());
+    event->set_global_position(input->get_mouse_position());
+    event->set_shift_pressed(held_keys[@"Shift"] != nil);
+    event->set_ctrl_pressed(held_keys[@"Control"] != nil);
+    event->set_alt_pressed(held_keys[@"Alt"] != nil);
+    event->set_meta_pressed(held_keys[@"Meta"] != nil);
+    if (pressed && button == 1) {
+        CFTimeInterval now = CACurrentMediaTime();
+        bool double_click = last_left_click > 0 && now - last_left_click < 0.35 && last_click_position.distance_to(input->get_mouse_position()) < 24;
+        event->set_double_click(double_click);
+        last_left_click = double_click ? 0 : now;
+        last_click_position = input->get_mouse_position();
+    }
+    input->parse_input_event(event);
+}
+
++ (void)scrollMouse:(NSInteger)direction {
+    Input *input = Input::get_singleton();
+    if (!input) return;
+    for (bool pressed : { true, false }) {
+        Ref<InputEventMouseButton> event;
+        event.instantiate();
+        event->set_button_index(direction > 0 ? MouseButton::WHEEL_UP : MouseButton::WHEEL_DOWN);
+        event->set_pressed(pressed);
+        event->set_factor(1.0);
+        event->set_button_mask(mouse_buttons);
+        event->set_position(input->get_mouse_position());
+        event->set_global_position(input->get_mouse_position());
+        input->parse_input_event(event);
+    }
+}
+
++ (BOOL)mouseCaptured {
+    auto *display = DisplayServerAppleEmbedded::get_singleton();
+    return display && display->player_get_effective_mouse_mode() == DisplayServerEnums::MOUSE_MODE_CAPTURED;
+}
+
++ (BOOL)mouseCursorVisible {
+    auto *display = DisplayServerAppleEmbedded::get_singleton();
+    if (!display) return NO;
+    auto mode = display->player_get_effective_mouse_mode();
+    return mode == DisplayServerEnums::MOUSE_MODE_VISIBLE || mode == DisplayServerEnums::MOUSE_MODE_CONFINED;
+}
+
++ (NSUInteger)mouseCursorRevision {
+    auto *display = DisplayServerAppleEmbedded::get_singleton();
+    return display ? display->player_get_cursor_revision() : 0;
+}
+
++ (UIImage *)mouseCursorImage {
+    auto *display = DisplayServerAppleEmbedded::get_singleton();
+    if (!display) return nil;
+    Ref<Image> image = display->player_get_cursor_image();
+    if (image.is_null()) return nil;
+    Vector<uint8_t> png = image->save_png_to_buffer();
+    NSData *data = [NSData dataWithBytes:png.ptr() length:png.size()];
+    return [UIImage imageWithData:data scale:MAX(1.0, GDTAppDelegateService.viewController.godotView.contentScaleFactor)];
+}
+
++ (CGPoint)mouseCursorHotspot {
+    auto *display = DisplayServerAppleEmbedded::get_singleton();
+    if (!display) return CGPointZero;
+    Vector2 hotspot = display->player_get_cursor_hotspot();
+    CGFloat scale = MAX(1.0, GDTAppDelegateService.viewController.godotView.contentScaleFactor);
+    return CGPointMake(hotspot.x / scale, hotspot.y / scale);
 }
 @end

@@ -7,6 +7,7 @@ struct PackInfo: Codable, Equatable {
     let patch: UInt32
     let fileCount: UInt32
     let byteCount: UInt64
+    var nativeFiles: [String]?
     var version: String { "\(major).\(minor).\(patch)" }
 }
 
@@ -50,6 +51,7 @@ enum PCKInspector {
         var names = Set<String>(), hasProject = false
         var binarySettings: (UInt64, UInt64)?
         var ranges: [(UInt64, UInt64)] = []
+        var nativeFiles: [String] = []
         for _ in 0..<count {
             let length = try reader.u32()
             guard length > 0, length <= 16_384 else { throw PackError.invalid("Invalid PCK path length.") }
@@ -72,9 +74,10 @@ enum PCKInspector {
             if path == "project.binary" { binarySettings = (base + offset, size) }
             if path == "project.godot", size == 0 { throw PackError.invalid("Empty project settings file.") }
             let ext = (path as NSString).pathExtension.lowercased()
-            guard !["gdextension", "gdnlib", "gde", "dll", "cs"].contains(ext) else {
-                throw PackError.invalid("\(path) requires native extensions, encrypted scripts, or .NET, which this runtime does not support.")
+            guard !["gde", "cs"].contains(ext) else {
+                throw PackError.invalid("\(path) is an encrypted script or .NET source, which this runtime does not support.")
             }
+            if ["gdextension", "gdnlib", "dll", "so", "dylib"].contains(ext), nativeFiles.count < 32 { nativeFiles.append(path) }
         }
         let directoryEnd = reader.position
         for (start, end) in ranges {
@@ -88,7 +91,7 @@ enum PCKInspector {
             try reader.seek(offset)
             guard try reader.read(4) == Data("ECFG".utf8) else { throw PackError.invalid("Invalid project.binary signature.") }
         }
-        return PackInfo(format: format, major: major, minor: minor, patch: patch, fileCount: count, byteCount: reader.size)
+        return PackInfo(format: format, major: major, minor: minor, patch: patch, fileCount: count, byteCount: reader.size, nativeFiles: nativeFiles.isEmpty ? nil : nativeFiles)
     }
 }
 

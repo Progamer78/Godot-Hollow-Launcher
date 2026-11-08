@@ -10,6 +10,15 @@ struct Game: Codable, Identifiable {
     var showControls = true
     var directionKeys = "arrows"
     var extraKeys = "Space,Shift"
+    // Optional fields preserve manifests written by the first installed player.
+    var controlProfile: ControlProfile?
+    var allowNativeFallback: Bool?
+
+    var controls: ControlProfile {
+        var profile = controlProfile ?? .legacy(directions: directionKeys, extras: extraKeys)
+        profile.constrain()
+        return profile
+    }
 }
 
 enum RuntimeSelection {
@@ -19,6 +28,9 @@ enum RuntimeSelection {
         }
         guard game.pack.major == 4 else { return "Only Godot 4 projects can run in this build." }
         guard game.pack.minor <= 7 else { return "This pack needs a newer Godot runtime than 4.7.2." }
+        if !(game.pack.nativeFiles ?? []).isEmpty, game.allowNativeFallback != true {
+            return "This pack includes native components. Enable ‘Try without native extensions’ to attempt offline play. Features that depend on those components will not work."
+        }
         return nil
     }
 }
@@ -33,9 +45,9 @@ final class GameLibrary: ObservableObject {
     let saves: URL
     private var manifest: URL { root.appendingPathComponent("library.json") }
 
-    init() {
-        root = files.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("GodotPlayer")
-        saves = files.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("GodotPlayerSaves")
+    init(storageRoot: URL? = nil, savesRoot: URL? = nil) {
+        root = storageRoot ?? files.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("GodotPlayer")
+        saves = savesRoot ?? files.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("GodotPlayerSaves")
         do {
             try files.createDirectory(at: root.appendingPathComponent("Games"), withIntermediateDirectories: true)
             try files.createDirectory(at: saves, withIntermediateDirectories: true)
@@ -62,6 +74,17 @@ final class GameLibrary: ObservableObject {
     func update(_ game: Game) {
         do { try persist(games.map { $0.id == game.id ? game : $0 }) }
         catch { self.error = error.localizedDescription }
+    }
+
+    @discardableResult
+    func saveControls(_ profile: ControlProfile, visible: Bool, for id: UUID) -> Bool {
+        guard var game = games.first(where: { $0.id == id }) else { error = "Game no longer exists in the library."; return false }
+        var checked = profile
+        checked.constrain()
+        game.controlProfile = checked
+        game.showControls = visible
+        do { try persist(games.map { $0.id == id ? game : $0 }); return true }
+        catch { self.error = "Could not save controls: \(error.localizedDescription)"; return false }
     }
 
     func delete(_ game: Game) {

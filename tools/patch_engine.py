@@ -4,7 +4,7 @@ import argparse
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH_REVISION = "controller-header-v2"
+PATCH_REVISION = "mouse-controls-v3"
 
 
 def replace(path, old, new):
@@ -21,7 +21,7 @@ def patch(engine):
     # Keep upstream's actual SwiftUI entry point, app delegate and render view.
     # Swap only its immediate game view for the native pack chooser.
     for source in (ROOT / "ios").iterdir():
-        if source.suffix in (".swift", ".mm", ".h"):
+        if source.suffix in (".swift", ".mm", ".h", ".inc"):
             shutil.copy2(source, apple / source.name)
     app = apple / "app.swift"
     original = app.read_text(encoding="utf-8")
@@ -110,6 +110,19 @@ def patch(engine):
         "Error GDExtension::open_library(const String &p_path, const Ref<GDExtensionLoader> &p_loader) {",
         "Error GDExtension::open_library(const String &p_path, const Ref<GDExtensionLoader> &p_loader) {\n"
         '\tERR_FAIL_V_MSG(ERR_UNAVAILABLE, "Native game extensions are disabled in Godot Player.");')
+
+    # iOS has touch input but upstream does not implement desktop mouse APIs.
+    # Keep the ordinary engine Input event path and expose virtual mouse state.
+    display_header = apple / "display_server_apple_embedded.h"
+    replace(display_header, '#include "core/os/thread_safe.h"', '#include "core/os/thread_safe.h"\n#include "core/input/input.h"')
+    replace(display_header, "\t// MARK: Motion", '#include "player_mouse_display.inc"\n\n\t// MARK: Motion')
+    replace(apple / "display_server_apple_embedded.mm",
+        "\t\tcase DisplayServerEnums::FEATURE_CLIPBOARD:",
+        "\t\tcase DisplayServerEnums::FEATURE_MOUSE:\n"
+        "\t\tcase DisplayServerEnums::FEATURE_MOUSE_WARP:\n"
+        "\t\tcase DisplayServerEnums::FEATURE_CURSOR_SHAPE:\n"
+        "\t\tcase DisplayServerEnums::FEATURE_CUSTOM_CURSOR_SHAPE:\n"
+        "\t\tcase DisplayServerEnums::FEATURE_CLIPBOARD:")
 
     # Check the generated translation unit, not just this patcher's contents.
     # A root-level patch_engine.py uploaded through the web is a different file

@@ -1,0 +1,26 @@
+{
+  "pack": "PokemonBattleAdvanced.pck",
+  "engine": [
+    4,
+    7,
+    1
+  ],
+  "format": 4,
+  "files": 11860,
+  "native_files": [
+    "addons/webrtc_native/webrtc_native.gdextension"
+  ],
+  "exit_code": 0,
+  "log_bytes": 1624,
+  "graphics_exit_code": 0,
+  "graphics_log_bytes": 71971,
+  "script_error": false,
+  "desktop_boot_scene_loaded": true,
+  "full_gameplay_tested": false,
+  "ios_tested": false,
+  "warnings": [
+    "Missing native WebRTC backend",
+    "Shutdown node-path errors and leaked objects/resources",
+    "Restricted Windows certificate store"
+  ]
+}

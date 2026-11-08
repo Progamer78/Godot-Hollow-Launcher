@@ -1,0 +1,11 @@
+{
+  "python_build_tools": "2 tests passed against official Godot source/export fixture",
+  "python_syntax": "passed",
+  "workflow_yaml": "parsed; model tests and early iPhone type-check configured",
+  "named_keys": "checked against pinned official Godot source",
+  "swift_tests": "new tests await macOS CI",
+  "native_ios_compilation": "not run for this update",
+  "new_ipa": "not produced here",
+  "device_mouse_editor_pokemon": "not tested",
+  "previous_device_games": "two working games reported by user; logs supplied"
+}

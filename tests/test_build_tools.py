@@ -24,6 +24,8 @@ class BuildToolsTests(unittest.TestCase):
             "core/extension/gdextension.cpp", "platform_methods.py",
             "drivers/apple_embedded/godot_view_renderer.mm",
             "drivers/apple_embedded/godot_view_apple_embedded.mm",
+            "drivers/apple_embedded/display_server_apple_embedded.h",
+            "drivers/apple_embedded/display_server_apple_embedded.mm",
         ]
         engine = ROOT / ".cache/godot-source"
         archive = ROOT / ".cache/source.zip"
@@ -46,6 +48,15 @@ class BuildToolsTests(unittest.TestCase):
             self.assertEqual(service.count("if (!player_engine_ready || !OS_AppleEmbedded::get_singleton()) return;"), 12)
             self.assertIn("player_save_path", (target / names[2]).read_text())
             self.assertIn("Native game extensions are disabled", (target / names[4]).read_text())
+            display = (target / "drivers/apple_embedded/display_server_apple_embedded.h").read_text()
+            self.assertEqual(display.count('#include "player_mouse_display.inc"'), 1)
+            self.assertIn('#include "core/input/input.h"', display)
+            self.assertTrue((target / "drivers/apple_embedded/GameControls.swift").is_file())
+            self.assertTrue((target / "drivers/apple_embedded/ControlProfile.swift").is_file())
+            self.assertTrue((target / "drivers/apple_embedded/player_mouse_display.inc").is_file())
+            features = (target / "drivers/apple_embedded/display_server_apple_embedded.mm").read_text()
+            for feature in ["FEATURE_MOUSE", "FEATURE_MOUSE_WARP", "FEATURE_CURSOR_SHAPE", "FEATURE_CUSTOM_CURSOR_SHAPE"]:
+                self.assertIn("case DisplayServerEnums::" + feature + ":", features)
             with self.assertRaises(RuntimeError):
                 module("patch_engine").patch(target)
 

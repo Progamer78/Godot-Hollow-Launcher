@@ -7,16 +7,19 @@ defer { try? FileManager.default.removeItem(at: dir) }
 
 func u32(_ number: UInt32) -> Data { var n = number.littleEndian; return withUnsafeBytes(of: &n) { Data($0) } }
 func u64(_ number: UInt64) -> Data { var n = number.littleEndian; return withUnsafeBytes(of: &n) { Data($0) } }
-func fixture(format: UInt32 = 4, path: String = "project.godot", flags: UInt32 = 0, entryFlags: UInt32 = 0, badOffset: Bool = false, duplicate: Bool = false) -> Data {
+func fixture(format: UInt32 = 4, path: String = "project.godot", flags: UInt32 = 0, entryFlags: UInt32 = 0, badOffset: Bool = false, duplicate: Bool = false, extraPaths: [String] = []) -> Data {
     let headerSize: UInt64 = format == 1 ? 84 : (format == 2 ? 96 : 112)
     let payload = Data("config_version=5\n[application]\nrun/main_scene=\"res://Main.tscn\"\n".utf8)
-    let entries: UInt32 = duplicate ? 2 : 1
-    var entry = u32(UInt32(path.utf8.count)) + Data(path.utf8)
-    let directorySize = 4 + Int(entries) * (4 + path.utf8.count + 32 + (format >= 2 ? 4 : 0))
+    let paths = [path] + (duplicate ? [path] : extraPaths)
+    let entries = UInt32(paths.count)
+    let directorySize = 4 + paths.reduce(0) { $0 + 4 + $1.utf8.count + 32 + (format >= 2 ? 4 : 0) }
     let payloadOffset = format <= 2 ? headerSize + UInt64(directorySize) : headerSize
-    entry += u64(badOffset ? UInt64.max : payloadOffset) + u64(UInt64(payload.count)) + Data(repeating: 0, count: 16)
-    if format >= 2 { entry += u32(entryFlags) }
-    let directory = u32(entries) + entry + (duplicate ? entry : Data())
+    var directory = u32(entries)
+    for name in paths {
+        directory += u32(UInt32(name.utf8.count)) + Data(name.utf8)
+        directory += u64(badOffset ? UInt64.max : payloadOffset) + u64(UInt64(payload.count)) + Data(repeating: 0, count: 16)
+        if format >= 2 { directory += u32(entryFlags) }
+    }
     var header = u32(0x43504447) + u32(format) + u32(format == 1 ? 3 : 4) + u32(7) + u32(2)
     if format >= 2 { header += u32(flags) + u64(0) }
     if format >= 3 { header += u64(headerSize + UInt64(payload.count)) }
@@ -49,8 +52,16 @@ try check(fixture(entryFlags: 2), valid: false, "removal patch")
 try check(fixture(entryFlags: 4), valid: false, "delta patch")
 try check(fixture(badOffset: true), valid: false, "integer overflow")
 try check(fixture(duplicate: true), valid: false, "duplicate path")
-try check(fixture(path: "game.gdextension"), valid: false, "native library")
+try check(fixture(path: "game.gdextension"), valid: false, "native resource-only archive still lacks project settings")
 try check(fixture(path: "project.binary"), valid: false, "invalid binary settings signature")
+let optionalNative = fixture(extraPaths: ["addons/webrtc_native/webrtc_native.gdextension", "addons/webrtc_native/lib/windows.dll"])
+try check(optionalNative, valid: true, "Complete project with possibly optional native components")
+try check(fixture(extraPaths: ["scripts/game.gde"]), valid: false, "Encrypted scripts remain unsupported")
+try check(fixture(extraPaths: ["scripts/game.cs"]), valid: false, ".NET scripts remain unsupported")
+let nativeURL = dir.appendingPathComponent("native.pck")
+try optionalNative.write(to: nativeURL)
+let nativeInfo = try PCKInspector.inspect(nativeURL)
+precondition(nativeInfo.nativeFiles?.count == 2, "Native dependencies must be reported rather than silently ignored")
 let good = fixture()
 for length in 0..<good.count { try check(good.prefix(length), valid: false, "truncated \(length)") }
 for file in CommandLine.arguments.dropFirst() {

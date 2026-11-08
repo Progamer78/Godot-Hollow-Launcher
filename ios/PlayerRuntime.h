@@ -11,5 +11,15 @@ NS_ASSUME_NONNULL_BEGIN
                                   error:(NSError * _Nullable * _Nullable)error;
 + (void)setKey:(NSString *)key pressed:(BOOL)pressed;
 + (void)releaseKeys;
++ (void)setMouseEnabled:(BOOL)enabled;
++ (void)moveMouse:(CGPoint)point fromView:(UIView *)view relative:(BOOL)relative NS_SWIFT_NAME(moveMouse(_:from:relative:));
++ (CGPoint)mousePositionInView:(UIView *)view NS_SWIFT_NAME(mousePosition(in:));
++ (void)setMouseButton:(NSInteger)button pressed:(BOOL)pressed;
++ (void)scrollMouse:(NSInteger)direction;
++ (BOOL)mouseCaptured;
++ (BOOL)mouseCursorVisible;
++ (NSUInteger)mouseCursorRevision;
++ (nullable UIImage *)mouseCursorImage;
++ (CGPoint)mouseCursorHotspot;
 @end
 NS_ASSUME_NONNULL_END

@@ -1,32 +1,52 @@
 # Validation recorded November 7, 2026
 
-Environment: Windows, Python 3.12, official Godot `4.7.2.stable.official.ed1daf0bf`. Editor download SHA256:
+The user reports successfully building and installing the preceding player and running two independently imported games on an actual iPhone. The supplied `Errors/(Smell)player.log` and `Errors/(Physician)player.log` confirm custom Godot 4.7.2 ARM64 execution on A17 Pro, using Compatibility and Mobile renderers respectively. This is real multi-game player evidence. It is user-reported device testing, not an automated device test performed here.
 
-`731980f9608d61333e5baf54a2ef17210acc7a538446c0cb9969f002aca1e953`
-
-This matches the official release asset metadata. The actual engine sources were downloaded and the narrow patch anchors were tested against that release.
+## Current mouse/control update
 
 | Check | Actual result |
 | --- | --- |
-| Original Movement PCK exported | Passed, 9,396 bytes |
-| Original independent Counter PCK exported | Passed, 8,180 bytes |
-| Movement main-pack execution from empty directory | Passed twice, saved counts loaded as 3 then 4 on final run |
-| Counter main-pack execution from empty directory | Passed twice, saved counts loaded as 3 then 4 on final run |
-| Movement autoload initialization | `movement-autoload`, assertion passed |
-| Injected key events, movement/animation, save operations | Both games reported their PASS markers |
-| Native graphics execution | Both passed with OpenGL 3.3 Compatibility on Intel Arc 130V; loaded 5, saved 6 |
-| Supplied reference game | Headless startup exited 0 after 90 frames; 97 dialogue nodes and validation OK |
-| Python build tools | 2 tests passed: real-source patch anchors and export-preparation fixture |
-| Python syntax compilation | Passed for tools and tests |
-| Swift inspector compilation/tests | Not run; macOS CI configured |
-| SwiftUI / Objective-C++ / custom Godot ARM64 compilation | Not run; no connected macOS/Xcode environment |
-| Player iOS save isolation, import, controls, audio, lifecycle | Not tested on device |
-| Same installed IPA launches two imported packs | Not tested; central acceptance test remains pending |
-| New unsigned or signed IPA | Not produced |
-| Godot 3 execution | Not implemented/tested |
+| Existing user library migration | Optional manifest fields preserve existing game IDs/settings; new Swift migration/persistence tests added, awaiting CI |
+| Saved control editor | Source implemented: drag, key/label/size changes, add/delete/reset, draft cancel, atomic per-game save; awaiting iOS compilation/device testing |
+| Mouse support | Source implemented: Apple display-server APIs, cursor image/state, Retina coordinate conversion, relative/direct movement, clicks/dragging/double-clicks/wheel, capture mode; awaiting iOS compilation/device testing |
+| Named virtual key codes | All named picker keys checked against the pinned official keyboard table; Control maps to Ctrl |
+| Source integration | Python tests pass against clean official 4.7.2 source fixtures, including mouse header/features and copied Swift sources |
+| Export preparation | Python fixture test passes; preserves existing export and archive pipeline |
+| Python syntax | Tools/tests compile successfully |
+| Workflow | YAML parsed; new pack/model tests and early iPhone Swift type-check are configured |
+| Updated Swift inspector/model tests | Added fixtures for optional native components, old library migration, persisted remappings/layouts, save preservation, portrait defaults and runtime gating; not executed on Windows |
+| New iOS runtime / IPA | Not compiled or produced in this Windows session; requires GitHub Actions/macOS |
+| Updated mouse/editor on iPhone | Not tested |
+| Godot 3 | Selection boundary retained; runtime not implemented, compiled or tested |
 
-The initial restricted run could not access the Windows certificate store. Successful desktop runs used approved normal Windows access and redirected APPDATA into the workspace. There were no script/engine errors in the final proof logs.
+The device logs explain the missing mouse: upstream iOS reports `mouse_get_position` unsupported, warns on `mouse_set_mode`, and rejects custom cursors. The update implements those APIs and adds an explicit toolbar toggle instead of relying on game touch-to-mouse settings.
 
-Full import/export/runtime logs and packs are local under `build/proof/`; selected concise logs and JSON results are copied alongside this report. Reproduce using the commands in the root README. Counts increase on subsequent proof runs, so the runner checks persistence relative to the prior count instead of hardcoding zero.
+## Pok?mon Battle Advanced investigation
 
-Desktop saves use Godot's existing per-project desktop paths. They establish ordinary GDScript save/load behavior, not the correctness of the new UUID save override on iOS. The reference PCK test establishes initialization only, not full gameplay compatibility.
+The original import error rejects `addons/webrtc_native/webrtc_native.gdextension`. The recovered project descriptor has no iOS library, and its networking scripts construct the WebRTC backend when host/join is used. Inspection of the original complete PCK found format 4, Godot 4.7.1 metadata, 11,860 entries, 120,091,308 bytes, and one native descriptor; Windows DLLs were not embedded in this PCK.
+
+The unchanged original pack was started from an empty working directory with official Godot 4.7.2 on Windows:
+
+- Headless startup: exit 0 after 180 frames; no `SCRIPT ERROR` or `Parse Error`.
+- Graphical startup: Compatibility renderer, exit 0 after 240 frames; the original `scenes/front/boot.tscn` completed loading; no `SCRIPT ERROR` or `Parse Error`.
+- Native WebRTC was unavailable. Shutdown reported object/resource leaks and node-path errors; a restricted certificate-store error also occurred. These were not clean full-gameplay runs.
+
+Full local evidence is in `build/pokemon-proof/`; concise results accompany this report. This proves desktop startup without that extension, not full gameplay or iPhone compatibility. No scripts or pack contents were modified. The importer now records native components as warnings; Play requires explicit ?Try without native extensions.? Actual native loading remains blocked. WebRTC multiplayer is unsupported.
+
+## Earlier verified foundations
+
+| Check | Actual result |
+| --- | --- |
+| Official Windows engine | Godot `4.7.2.stable.official.ed1daf0bf`; release checksum verified |
+| Movement and independent Counter packs | Both exported and executed headlessly and in OpenGL windows using `--main-pack` from an empty directory |
+| Sample input/animation/autoload/save/load | Both emitted PASS markers and loaded saved counts across subsequent launches |
+| Supplied Smell pack desktop startup | Exit 0, 97 dialogue nodes and game-data validation OK; later user reports actual iPhone gameplay working |
+| Previous Swift inspector tests | Earlier macOS CI compiled and passed all 253 original checks |
+| Previous macOS sample proofs | Both passed headlessly, twice, with saved counts restored |
+| Previous custom ARM64 engine/launcher | Third CI run passed iOS Swift type-check and full SCons compilation |
+| Xcode export fixes | Missing ETC2/ASTC setting and icon reproduced and fixed; official-template export/prepare verified locally; subsequent user installation and game execution establish a successful player build |
+| Detailed iPhone save isolation/lifecycle/controller scenarios | Still need specific regression tests; ordinary successful gameplay alone does not establish every scenario |
+
+Official Windows executable SHA256: `731980f9608d61333e5baf54a2ef17210acc7a538446c0cb9969f002aca1e953`.
+
+Original proof logs/JSON are preserved beside this file and under `build/proof/`. Export reproduction results are in `ios-export-results.json` and `build/ios-export-proof/`. Earlier CI failures were a missing renderer controller header, an incorrectly uploaded root patcher rather than `tools/patch_engine.py`, then bootstrap export configuration. The working build pipeline and those fixes are retained.
