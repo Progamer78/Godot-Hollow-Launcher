@@ -1,9 +1,0 @@
-config_version=5
-
-[application]
-config/name="Godot Player"
-run/main_scene="res://Empty.tscn"
-config/features=PackedStringArray("4.7", "GL Compatibility")
-
-[rendering]
-renderer/rendering_method="gl_compatibility"
