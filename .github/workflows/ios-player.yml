@@ -34,16 +34,37 @@ jobs:
           swiftc -swift-version 5 ios/PCKInspector.swift tests/pck/main.swift -o build/pck-tests
           build/pck-tests build/proof/movement.pck build/proof/counter.pck
           python3 -m unittest discover -s tests -v
-      - name: Patch the runtime startup and save path
-        run: python3 tools/patch_engine.py .cache/godot-source
+      - name: Patch and verify player integration
+        run: |
+          python3 tools/patch_engine.py .cache/godot-source
+          python3 - <<'PY'
+          from pathlib import Path
+          renderer = Path('.cache/godot-source/drivers/apple_embedded/godot_view_renderer.mm')
+          if '#import "godot_view_controller.h"' not in renderer.read_text():
+              raise SystemExit('Outdated patcher: replace tools/patch_engine.py. A copy at the repository root is not used by this workflow.')
+          print('Controller header fix is present in the generated renderer.')
+          PY
+      - name: Type-check the complete iOS launcher before compiling Godot
+        run: |
+          set -o pipefail
+          xcrun --sdk iphoneos swiftc -typecheck -parse-as-library \
+            -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -swift-version 5 -cxx-interoperability-mode=default \
+            -module-name godot_swift_module -target arm64-apple-ios14.0 \
+            -I .cache/godot-source \
+            -import-objc-header .cache/godot-source/drivers/apple_embedded/bridging_header_apple_embedded.h \
+            .cache/godot-source/drivers/apple_embedded/*.swift \
+            2>&1 | tee build/ios-typecheck.log
       - name: Compile ARM64 runtime with external main-pack support
         run: |
+          set -o pipefail
           python3 -m venv .cache/scons-env
           .cache/scons-env/bin/pip install scons==4.10.1
           cd .cache/godot-source
           ../scons-env/bin/scons platform=ios target=template_release arch=arm64 \
             disable_path_overrides=no vulkan=no metal=yes opengl3=yes \
-            debug_symbols=no optimize=size -j"$(sysctl -n hw.logicalcpu)"
+            debug_symbols=no optimize=size -j"$(sysctl -n hw.logicalcpu)" \
+            2>&1 | tee ../../build/runtime-build.log
       - name: Export Xcode project using the working reference pipeline
         run: |
           mkdir -p build/ios
@@ -60,7 +81,7 @@ jobs:
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_STYLE=Manual DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" CODE_SIGN_ENTITLEMENTS="" \
-            OTHER_CODE_SIGN_FLAGS="" | tee build/xcodebuild.log
+            OTHER_CODE_SIGN_FLAGS="" 2>&1 | tee build/xcodebuild.log
       - name: Package IPA for personal signing
         run: |
           mkdir -p build/package/Payload
@@ -73,7 +94,7 @@ jobs:
           name: GodotPlayer-build-and-tests
           path: |
             build/GodotPlayer-unsigned.ipa
-            build/xcodebuild.log
+            build/*.log
             build/proof/*.pck
             build/proof/*.log
             build/proof/results.json
