@@ -22,4 +22,15 @@ struct ToolReply: Decodable {
     let truncated: Bool?
     let visited: Int?
     let undoCount: Int?
+    var ready: Bool? = nil
+}
+
+struct SavedCheat: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var label: String
+    var type: String
+    var value: String
+    // A stable scene/resource label is resolved again each session. Instance
+    // IDs are deliberately not persisted across process lifetimes.
 }

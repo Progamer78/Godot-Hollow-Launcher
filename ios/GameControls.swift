@@ -6,8 +6,9 @@ private struct EngineView: UIViewControllerRepresentable {
     let controller: UIViewController
     let ratio: Double
     let orientation: String
+    let inset: Double
     func makeUIViewController(context: Context) -> UIViewController {
-        PlayerGameContainer(engine: controller, ratio: ratio, orientation: orientation)
+        PlayerGameContainer(engine: controller, ratio: ratio, orientation: orientation, inset: inset)
     }
     func updateUIViewController(_ controller: UIViewController, context: Context) {}
 }
@@ -16,8 +17,9 @@ private final class PlayerGameContainer: UIViewController {
     let engine: UIViewController
     let ratio: Double
     let orientation: String
-    init(engine: UIViewController, ratio: Double, orientation: String) {
-        self.engine = engine; self.ratio = ratio; self.orientation = orientation
+    let inset: Double
+    init(engine: UIViewController, ratio: Double, orientation: String, inset: Double) {
+        self.engine = engine; self.ratio = ratio; self.orientation = orientation; self.inset = inset.isFinite ? min(48, max(0, inset)) : 0
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -29,7 +31,7 @@ private final class PlayerGameContainer: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         let bounds = view.bounds
-        let area = bounds.height > bounds.width ? view.safeAreaLayoutGuide.layoutFrame : bounds
+        let area = (bounds.height > bounds.width || inset > 0 ? view.safeAreaLayoutGuide.layoutFrame : bounds).insetBy(dx: CGFloat(inset), dy: CGFloat(inset))
         let fitted = GameViewport.frame(width: Double(area.width), height: Double(area.height), aspect: ratio)
         engine.view.frame = CGRect(x: area.minX + CGFloat(fitted.x), y: area.minY + CGFloat(fitted.y),
                                    width: CGFloat(fitted.width), height: CGFloat(fitted.height))
@@ -66,6 +68,14 @@ struct GameScreen: View {
     @State private var controlArea = CGSize.zero
     @State private var needsInitialLayout: Bool
     @State private var menuOpen = false
+    @State private var showingKeyboard = false
+    @State private var debuggingInput = false
+    @State private var inputStatus = ""
+    @State private var launchReady = false
+    @State private var sessionStart = Date()
+    @State private var lastTick = Date.distantPast
+    @State private var wasActive = true
+    private let heartbeat = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
     @State private var menuHeight: CGFloat = 220
     @AppStorage("playerMenuX") private var menuX = 1.0
     @AppStorage("playerMenuY") private var menuY = 0.0
@@ -80,7 +90,7 @@ struct GameScreen: View {
 
     var body: some View {
         ZStack {
-            EngineView(controller: session.controller, ratio: session.aspectRatio, orientation: session.game.displayOrientation)
+            EngineView(controller: session.controller, ratio: session.aspectRatio, orientation: session.game.displayOrientation, inset: session.game.displayInset ?? 0)
                 .ignoresSafeArea()
                 .allowsHitTesting(!editing && !profile.mouseEnabled)
             if profile.mouseEnabled && !editing {
@@ -93,15 +103,34 @@ struct GameScreen: View {
                     if showButtons || editing {
                         ForEach(profile.buttons) { button in
                             control(button, in: area.size)
+                                .opacity(profile.opacity ?? 0.85)
                         }
                     }
                     if menuOpen || editing { menuPanel(in: area.size) }
                     menuHandle(in: area.size)
+                    if debuggingInput {
+                        Text(inputStatus).font(.system(.caption2, design: .monospaced)).padding(6).background(Color.black.opacity(0.75)).foregroundColor(.green).allowsHitTesting(false)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    }
                 }
                 .coordinateSpace(name: "playerControls")
                 .onAppear { updateArea(area.size) }
                 .onChange(of: area.size) { updateArea($0) }
             }.padding(8)
+        }
+        .sheet(isPresented: $showingKeyboard, onDismiss: { PlayerRuntime.setMouseEnabled(profile.mouseEnabled && !editing) }) { TextEntryPanel() }
+        .onReceive(heartbeat) { now in
+            guard phase == .active else { return }
+            if launchReady { _ = ToolsBridge.send(["action": "tick"]) }
+            if now.timeIntervalSince(lastTick) >= 1 {
+                lastTick = now
+                let status = ToolsBridge.send(["action": "status"])
+                if !launchReady, status.ready == true {
+                    launchReady = true; library.journal(session.game, status: "running"); library.markPlayed(session.id)
+                    if let fps = session.game.frameLimit, fps != 0 { _ = ToolsBridge.send(["action": "options", "fps": fps]) }
+                }
+                if debuggingInput { inputStatus = "Keys: \(GameInput.debugKeys.sorted().joined(separator: ", "))\nAxes: \(GameInput.axes.sorted { $0.key < $1.key }.map { "\($0.key)=\(String(format: "%.2f", $0.value))" }.joined(separator: " "))\n\(status.message ?? "loading")" }
+            }
         }
         .sheet(item: $selected) { button in
             ControlButtonEditor(button: button, onSave: { edited in
@@ -121,10 +150,16 @@ struct GameScreen: View {
         }
         .sheet(isPresented: $showingTools, onDismiss: {
             PlayerRuntime.setMouseEnabled(profile.mouseEnabled && !editing)
-        }) { GameTools() }
+        }) { GameTools(gameID: session.id) }
         .onAppear { PlayerRuntime.setMouseEnabled(profile.mouseEnabled && !editing) }
-        .onDisappear { PlayerRuntime.releaseKeys(); PlayerRuntime.setMouseEnabled(false) }
-        .onChange(of: phase) { if $0 != .active { PlayerRuntime.releaseKeys() } }
+        .onDisappear { GameInput.release(); PlayerRuntime.setMouseEnabled(false) }
+        .onChange(of: phase) { value in
+            if value != .active {
+                GameInput.release()
+                library.journal(session.game, status: launchReady ? "backgrounded" : "starting")
+                if wasActive { library.markPlayed(session.id, seconds: Date().timeIntervalSince(sessionStart)); wasActive = false }
+            } else { wasActive = true; sessionStart = Date(); if launchReady { library.journal(session.game, status: "running") } }
+        }
     }
 
     private var menuContents: some View {
@@ -157,7 +192,7 @@ struct GameScreen: View {
             } else {
                 HStack(spacing: 16) {
                     Button(showButtons ? "Hide Controls" : "Show Controls") {
-                        PlayerRuntime.releaseKeys()
+                        GameInput.release()
                         if library.saveControls(profile, visible: !showButtons, for: session.id) {
                             showButtons.toggle()
                             menuOpen = false
@@ -178,14 +213,17 @@ struct GameScreen: View {
                     Text("Floating joystick: drag anywhere outside the buttons and menu. Mouse mode is off.").font(.caption)
                 }
                 Button("Edit Controls") {
-                    PlayerRuntime.releaseKeys()
+                    GameInput.release()
                     PlayerRuntime.setMouseEnabled(false)
                     original = profile
                     originalVisibility = showButtons
                     editing = true
                 }
+                Button("Keyboard & Text") { GameInput.release(); PlayerRuntime.setMouseEnabled(false); menuOpen = false; showingKeyboard = true }
+                Button(debuggingInput ? "Hide Input Monitor" : "Show Input Monitor") { debuggingInput.toggle(); menuOpen = false }
+                Button("Release All Inputs") { GameInput.release() }
                 Button {
-                    PlayerRuntime.releaseKeys()
+                    GameInput.release()
                     PlayerRuntime.setMouseEnabled(false)
                     menuOpen = false
                     showingTools = true
@@ -196,7 +234,7 @@ struct GameScreen: View {
                             var updated = profile
                             updated.mouseMode = updated.mouseMode == "trackpad" ? "direct" : "trackpad"
                             if library.saveControls(updated, visible: showButtons, for: session.id) {
-                                PlayerRuntime.releaseKeys()
+                                GameInput.release()
                                 profile = updated
                                 menuOpen = false
                             }
@@ -298,7 +336,7 @@ struct GameScreen: View {
                 }
             })
         } else {
-            KeySurface(title: button.label, key: button.key)
+            KeySurface(title: button.label, key: button.key, configuration: button, highContrast: profile.highContrast == true, haptics: profile.haptics == true)
                 .frame(width: CGFloat(button.width), height: CGFloat(button.height))
                 .position(center)
         }
@@ -378,6 +416,11 @@ private struct ControlButtonEditor: View {
                 Picker("Input", selection: $button.key) {
                     ForEach(ControlKeys.all.contains(button.key) ? ControlKeys.all : [button.key] + ControlKeys.all, id: \.self) { key in Text(key).tag(key) }
                 }
+                Picker("Behavior", selection: Binding(get: { button.behavior ?? "hold" }, set: { button.behavior = $0 == "hold" ? nil : $0 })) {
+                    Text("Hold while touched").tag("hold"); Text("Tap to toggle").tag("toggle"); Text("Repeat while touched").tag("repeat")
+                }
+                TextField("Additional keys, comma-separated", text: Binding(get: { button.combo?.joined(separator: ",") ?? "" }, set: { value in button.combo = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }))
+                Text("Examples: Shift,W or Control,S. Toggle holds until tapped again; Release All Inputs always clears it.").font(.caption)
                 Section(header: Text("Size")) {
                     Text("Width: \(Int(button.width))")
                     Slider(value: $button.width, in: 44...160, step: 2)
@@ -404,29 +447,67 @@ private struct ControlButtonEditor: View {
 
 private final class KeyButton: UIButton {
     var mappedKey = ""
-    private var pressedKey: String?
-    override var isHighlighted: Bool {
-        didSet { backgroundColor = isHighlighted ? UIColor.systemTeal.withAlphaComponent(0.8) : UIColor.black.withAlphaComponent(0.6) }
+    var extraKeys: [String] = []
+    var behavior = "hold"
+    var haptics = false
+    private var heldKeys: [String] = []
+    private var repeatTimer: Timer?
+    private var orderedKeys: [String] {
+        let modifiers = ["Shift", "Control", "Alt", "Meta"]
+        return Array(Set([mappedKey] + extraKeys)).sorted {
+            let left = modifiers.firstIndex(of: $0) ?? 100, right = modifiers.firstIndex(of: $1) ?? 100
+            return left == right ? $0 < $1 : left < right
+        }
     }
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        NotificationCenter.default.addObserver(self, selector: #selector(release), name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(release), name: Notification.Name("GodotPlayerReleaseInputs"), object: nil)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    deinit { repeatTimer?.invalidate(); NotificationCenter.default.removeObserver(self) }
+    override var isHighlighted: Bool {
+        didSet { refreshAppearance() }
+    }
+    override var isSelected: Bool { didSet { refreshAppearance() } }
+    private func refreshAppearance() { backgroundColor = isHighlighted || isSelected ? UIColor.systemTeal.withAlphaComponent(0.8) : UIColor.black.withAlphaComponent(0.6) }
     override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
-        guard pressedKey == nil else { return false }
-        pressedKey = mappedKey
-        PlayerRuntime.setKey(mappedKey, pressed: true)
+        if haptics { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+        if behavior == "toggle", !heldKeys.isEmpty { release(); return true }
+        guard heldKeys.isEmpty else { return false }
+        let keys = orderedKeys
+        for key in keys { GameInput.key(key, pressed: true) }
+        heldKeys = keys
+        if behavior == "toggle" { isSelected = true; accessibilityValue = "On" }
+        if behavior == "repeat" {
+            for key in heldKeys.reversed() { GameInput.key(key, pressed: false) }; heldKeys = []
+            let timer = Timer(timeInterval: 0.12, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                for key in self.orderedKeys { GameInput.key(key, pressed: true) }
+                for key in self.orderedKeys.reversed() { GameInput.key(key, pressed: false) }
+            }
+            repeatTimer = timer; RunLoop.main.add(timer, forMode: .common)
+        }
         isHighlighted = true
         return true
     }
-    func release() {
-        if let key = pressedKey { PlayerRuntime.setKey(key, pressed: false) }
-        pressedKey = nil
+    @objc func release() {
+        repeatTimer?.invalidate(); repeatTimer = nil
+        for key in heldKeys.reversed() { GameInput.key(key, pressed: false) }
+        heldKeys = []
+        isSelected = false; accessibilityValue = behavior == "toggle" ? "Off" : nil
         isHighlighted = false
     }
-    override func endTracking(_ touch: UITouch?, with event: UIEvent?) { release() }
+    override func endTracking(_ touch: UITouch?, with event: UIEvent?) { if behavior != "toggle" { release() } }
     override func cancelTracking(with event: UIEvent?) { release() }
 }
 
 private struct KeySurface: UIViewRepresentable {
     let title: String
     let key: String
+    var configuration: ControlButton? = nil
+    var highContrast = false
+    var haptics = false
     func makeUIView(context: Context) -> KeyButton {
         let button = KeyButton(type: .custom)
         button.backgroundColor = UIColor.black.withAlphaComponent(0.65)
@@ -439,8 +520,11 @@ private struct KeySurface: UIViewRepresentable {
         return button
     }
     func updateUIView(_ button: KeyButton, context: Context) {
-        if button.mappedKey != key { button.release() }
+        if button.mappedKey != key || button.extraKeys != (configuration?.combo ?? []) || button.behavior != (configuration?.behavior ?? "hold") { button.release() }
         button.mappedKey = key
+        button.extraKeys = configuration?.combo ?? []; button.behavior = configuration?.behavior ?? "hold"; button.haptics = haptics
+        button.layer.borderWidth = highContrast ? 3 : 1
+        button.layer.borderColor = highContrast ? UIColor.white.cgColor : UIColor.systemTeal.withAlphaComponent(0.45).cgColor
         button.accessibilityLabel = "\(title), \(key)"
         button.setTitle(title, for: .normal)
     }

@@ -7,9 +7,14 @@
 #if VERSION_MAJOR >= 4
 #include "core/object/script_language.h"
 #include "scene/main/window.h"
+#include "core/input/input.h"
+#include "core/config/engine.h"
 #else
 #include "core/script_language.h"
 #include "scene/main/viewport.h"
+#include "core/os/input.h"
+#include "core/os/keyboard.h"
+#include "core/engine.h"
 #endif
 
 static uint64_t parse_id(const String &text) {
@@ -77,6 +82,7 @@ void PlayerTools::scan_value(Object *owner, const Variant &value, const Array &p
     if (++examined > 12000 || rows.size() >= 150) { truncated = true; return; }
     String type = scalar_type(value);
     if (!is_empty_text(type)) {
+        if (numeric_only && type != "int" && type != "float") return;
         if (!is_empty_text(filter) && label.to_lower().find(filter) < 0) return;
         // Avoid flooding the editor with narrative text or save blobs.
         String display = type == "bool" ? (bool(value) ? "true" : "false") : String(value);
@@ -240,7 +246,7 @@ bool PlayerTools::write(Object *owner, const Array &path, int index, Variant &va
     return false;
 }
 
-Dictionary PlayerTools::edit(const Dictionary &command) {
+Dictionary PlayerTools::edit(const Dictionary &command, bool record) {
     if (!command.has("target") || command["target"].get_type() != Variant::DICTIONARY) return failure("Choose a stat first.");
     Dictionary target = command["target"]; Object *owner = nullptr; Array path; Variant current; String error;
     if (!resolve(target, owner, path, current, error)) return failure(error);
@@ -267,6 +273,7 @@ Dictionary PlayerTools::edit(const Dictionary &command) {
     if (!write(owner, path, 0, root, replacement)) return failure("The game rejected this change.");
     Variant actual; Object *check_owner = nullptr; Array check_path;
     if (!resolve(target, check_owner, check_path, actual, error) || actual != replacement) return failure("The game's setter did not keep that value. Refresh to inspect it.");
+    if (record) {
     Change change; change.target = target; change.before = current; change.after = actual;
     if (history.size() >= 20) {
 #if VERSION_MAJOR >= 4
@@ -276,10 +283,12 @@ Dictionary PlayerTools::edit(const Dictionary &command) {
 #endif
     }
     history.push_back(change);
+    }
     Dictionary result; result["ok"] = true; result["message"] = "Value updated in the running game."; result["undoCount"] = history.size(); return result;
 }
 
 Dictionary PlayerTools::undo() {
+    frozen.clear();
     if (!history.size()) return failure("There are no edits to undo in this session.");
     Change change = history[history.size() - 1]; Object *owner = nullptr; Array path; Variant current; String error;
     if (!resolve(change.target, owner, path, current, error)) return failure(error);
@@ -314,12 +323,172 @@ Dictionary PlayerTools::evaluate(const String &code) {
 
 Dictionary PlayerTools::request(const Dictionary &command) {
     String action = command.get("action", "scan");
+    if (action == "objects") {
+        if (!tree() || !tree()->get_root()) return failure("Scene is not ready.");
+        Array pending, objects; pending.push_back(object_id(tree()->get_root()));
+        for (int index = 0; index < pending.size() && index < 200; index++) {
+            Node *node = Object::cast_to<Node>(live_object(parse_id(pending[index])));
+            if (!node) continue;
+            Dictionary row; row["object"] = object_id(node); row["path"] = Array(); row["label"] = String(node->get_path());
+            row["value"] = node->get_class(); row["type"] = "object"; objects.push_back(row);
+            for (int child = 0; child < node->get_child_count() && pending.size() < 201; child++) pending.push_back(object_id(node->get_child(child)));
+        }
+        Dictionary result; result["ok"] = true; result["rows"] = objects; result["truncated"] = pending.size() > 200; result["undoCount"] = history.size(); return result;
+    }
     if (action == "scan") return scan(command.get("search", ""));
     if (action == "edit") return edit(command);
     if (action == "undo") return undo();
     if (action == "pause") return pause(command.get("enabled", false));
     if (action == "evaluate") return evaluate(command.get("code", ""));
+    if (action == "input" || action == "release_input") return input(command);
+    if (action == "options" || action == "status") return options(command);
+    if (action == "find_numbers" || action == "refine_numbers") return find_numbers(command);
+    if (action == "freeze") {
+        if (frozen.size() >= 20) return failure("Only 20 values can be frozen in one session.");
+        Dictionary result = edit(command);
+        if (bool(result.get("ok", false))) frozen.push_back(command);
+        return result;
+    }
+    if (action == "clear_freezes") { frozen.clear(); Dictionary result; result["ok"] = true; return result; }
+    if (action == "tick") {
+        int failed = 0;
+        if (tree() && !tree()->is_paused()) {
+            Array remaining;
+            for (int i = 0; i < frozen.size(); i++) {
+                Dictionary result = edit(frozen[i], false);
+                if (bool(result.get("ok", false))) remaining.push_back(frozen[i]); else failed++;
+            }
+            frozen = remaining;
+        }
+        Dictionary result; result["ok"] = true; result["message"] = itos(frozen.size()) + " frozen values; " + itos(failed) + " stale values released."; return result;
+    }
     return failure("Unknown tools request.");
+}
+
+Dictionary PlayerTools::options(const Dictionary &command) {
+    Engine *engine = Engine::get_singleton();
+    if (!engine) return failure("Engine is not ready.");
+#if VERSION_MAJOR >= 4
+    if (original_fps < 0) original_fps = engine->get_max_fps();
+#else
+    if (original_fps < 0) original_fps = engine->get_target_fps();
+#endif
+    if (command.has("fps")) {
+        int fps = command["fps"];
+        if (fps != 0 && fps != 30 && fps != 60 && fps != 120) return failure("Choose the default, 30, 60 or 120 FPS.");
+#if VERSION_MAJOR >= 4
+        engine->set_max_fps(fps == 0 ? original_fps : fps);
+#else
+        engine->set_target_fps(fps == 0 ? original_fps : fps);
+#endif
+    }
+    if (command.has("speed")) {
+        double speed = command["speed"];
+        if (Math::is_nan(speed) || Math::is_inf(speed) || speed < 0.25 || speed > 3) return failure("Game speed must be between 0.25 and 3.");
+        engine->set_time_scale(speed);
+    }
+    Dictionary result; result["ok"] = true;
+    result["message"] = String("FPS: ") + itos(engine->get_frames_per_second()) + " | speed: " + String::num(engine->get_time_scale()) + " | scene: " + (tree() && tree()->get_current_scene() ? String(tree()->get_current_scene()->get_name()) : String("loading"));
+    result["ready"] = tree() && tree()->get_current_scene();
+    return result;
+}
+
+Dictionary PlayerTools::input(const Dictionary &command) {
+    Input *input = Input::get_singleton(); if (!input) return failure("Input is not ready.");
+    const bool release = String(command.get("action", "")) == "release_input";
+    if (release && virtual_pad < 0) { Dictionary result; result["ok"] = true; return result; }
+    if (!release && String(command.get("kind", "")) == "text") {
+        String text = command.get("text", ""); if (text.length() > 2048) return failure("Send at most 2048 characters at once.");
+        for (int i = 0; i < text.length(); i++) {
+            uint32_t codepoint = text[i];
+            // Godot 3 uses UTF-16 wchar_t on Windows; Apple and Godot 4
+            // use full-width code points. Send one event per Unicode scalar.
+            if (codepoint >= 0xD800 && codepoint <= 0xDBFF && i + 1 < text.length()) {
+                uint32_t next = text[i + 1];
+                if (next >= 0xDC00 && next <= 0xDFFF) { codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + next - 0xDC00; i++; }
+            }
+            for (int pressed = 1; pressed >= 0; pressed--) {
+                Ref<InputEventKey> event;
+#if VERSION_MAJOR >= 4
+                event.instantiate();
+                if (codepoint == '\n') event->set_keycode(Key::ENTER);
+#else
+                event.instance();
+                if (codepoint == '\n') event->set_scancode(KEY_ENTER);
+#endif
+                event->set_unicode(codepoint); event->set_pressed(pressed); input->parse_input_event(event);
+            }
+        }
+        Dictionary result; result["ok"] = true; return result;
+    }
+    if (virtual_pad < 0) {
+        Array connected = input->get_connected_joypads();
+        for (int device = 15; device >= 8; device--) if (!connected.has(device)) { virtual_pad = device; break; }
+        if (virtual_pad < 0) return failure("No free virtual gamepad slot.");
+        input->joy_connection_changed(virtual_pad, true, "Godot Player Virtual Controller", "");
+    }
+    String kind = command.get("kind", "axis");
+    if (release || kind == "axis") {
+        int first = release ? 0 : int(command.get("axis", 0)), last = release ? 5 : first;
+        double value = release ? 0.0 : double(command.get("value", 0.0));
+        if (first < 0 || last > 5 || Math::is_nan(value) || Math::is_inf(value) || value < -1 || value > 1) return failure("Invalid gamepad axis value.");
+        for (int axis = first; axis <= last; axis++) {
+            Ref<InputEventJoypadMotion> event;
+#if VERSION_MAJOR >= 4
+            event.instantiate(); event->set_axis(JoyAxis(axis));
+#else
+            event.instance(); event->set_axis(axis >= 4 ? axis + 2 : axis);
+#endif
+            event->set_device(virtual_pad); event->set_axis_value(value); input->parse_input_event(event);
+        }
+    }
+    if (release || kind == "button") {
+        int first = release ? 0 : int(command.get("button", 0)), last = release ? 13 : first;
+        if (first < 0 || last > 13) return failure("Invalid gamepad button.");
+        for (int button = first; button <= last; button++) {
+            Ref<InputEventJoypadButton> event;
+#if VERSION_MAJOR >= 4
+            static const int mapping[] = {0, 1, 2, 3, 9, 10, 4, 6, 7, 8, 11, 12, 13, 14};
+            event.instantiate(); event->set_button_index(JoyButton(mapping[button]));
+#else
+            static const int mapping[] = {0, 1, 2, 3, 4, 5, 10, 11, 8, 9, 12, 13, 14, 15};
+            event.instance(); event->set_button_index(mapping[button]);
+#endif
+            event->set_device(virtual_pad); event->set_pressed(!release && bool(command.get("pressed", false))); input->parse_input_event(event);
+        }
+    }
+    Dictionary result; result["ok"] = true; return result;
+}
+
+Dictionary PlayerTools::find_numbers(const Dictionary &command) {
+    String action = command.get("action", "");
+    if (action == "find_numbers") {
+        numeric_only = true; scan(""); numeric_only = false;
+        number_candidates = rows.duplicate();
+    }
+    String comparison = command.get("comparison", "exact"), expected = command.get("value", "");
+    Array remaining;
+    for (int i = 0; i < number_candidates.size(); i++) {
+        Dictionary row = number_candidates[i]; Object *owner = nullptr; Array path; Variant value; String error;
+        if (!resolve(row, owner, path, value, error)) continue;
+        String now = String(value), before = row["value"];
+        bool increased = false, decreased = false;
+        if (value.get_type() == Variant::INT) {
+            bool valid = false; int64_t old = parse_integer(before, valid);
+            if (valid) { increased = int64_t(value) > old; decreased = int64_t(value) < old; }
+        } else {
+#if VERSION_MAJOR >= 4
+            double old = before.to_float();
+#else
+            double old = before.to_double();
+#endif
+            increased = double(value) > old; decreased = double(value) < old;
+        }
+        bool keep = comparison == "any" || (comparison == "exact" && now == expected.strip_edges()) || (comparison == "changed" && now != before) || (comparison == "unchanged" && now == before) || (comparison == "increased" && increased) || (comparison == "decreased" && decreased);
+        if (keep) { row["value"] = now; remaining.push_back(row); }
+    }
+    number_candidates = remaining;
+    Dictionary result; result["ok"] = true; result["rows"] = remaining; result["truncated"] = truncated; result["undoCount"] = history.size(); return result;
 }
 
 String PlayerTools::dispatch_json(const String &json) {

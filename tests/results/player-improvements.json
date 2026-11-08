@@ -1,0 +1,98 @@
+{
+  "date": "2026-11-08",
+  "package": "GodotPlayer-Features-APK-Update.zip",
+  "source_hashes": {
+    "runtime_shared/player_tools/player_tools.cpp": "029b9c88d9c6e90463aae853b07d2796b5e7fa196b92ed661f54cc1d94b165fc",
+    "ios/ArchiveCore.inc": "4cc868c5f7072166400245bce38ea9430e2e4a1585e5e42ccc33c7ce76c72ecd",
+    "ios/PackageImport.swift": "af1a039d41d25526bdb00978735c579a0c0b11093fef1deb3fcee17763be7dee",
+    "ios/SaveVault.swift": "4ddf4c9de5c0815730585bf4e9304e6c46f604056e8d20e4f1cc37689cdb63a2"
+  },
+  "desktop_compilation": {
+    "godot3": "complete Windows release build passed",
+    "godot4": "complete Windows release build passed",
+    "shared_source_matches_both_compiled_trees": true
+  },
+  "native_checks": [
+    {
+      "engine_major": 3,
+      "checks_passed": 66,
+      "runtime": "locally compiled official release plus PlayerTools",
+      "result": "passed",
+      "ios_ui": "not tested"
+    },
+    {
+      "engine_major": 4,
+      "checks_passed": 66,
+      "runtime": "locally compiled official release plus PlayerTools",
+      "result": "passed",
+      "ios_ui": "not tested"
+    }
+  ],
+  "archive_layout_proofs": [
+    {
+      "engine_major": 3,
+      "exit": 0,
+      "asset_bytes": 2631,
+      "assets": 4,
+      "native_zip_extraction": "passed",
+      "pack_layout_execution": "passed",
+      "swift_importer": "not run; requires macOS/iOS tests",
+      "original_assets": "unchanged"
+    },
+    {
+      "engine_major": 4,
+      "exit": 0,
+      "asset_bytes": 8642,
+      "assets": 9,
+      "native_zip_extraction": "passed",
+      "pack_layout_execution": "passed",
+      "swift_importer": "not run; requires macOS/iOS tests",
+      "original_assets": "unchanged"
+    }
+  ],
+  "regression_lili": {
+    "exit": 0,
+    "frames": 180,
+    "script_errors": 0,
+    "bytecode_rejections": 0,
+    "ios_execution": "not tested"
+  },
+  "source_and_archive_tests": {
+    "tests": 16,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "swift_validation": {
+    "files_syntax_checked": 15,
+    "syntax_errors": 0,
+    "parser": "tree-sitter-swift 0.7.4",
+    "typecheck": "not performed locally",
+    "macos_objc_bridge": "not compiled locally",
+    "actual_swift_apk_wrapper": "not executed locally",
+    "save_vault_tests": "added to macOS model tests; not executed locally",
+    "ui_device_test": "not performed"
+  },
+  "workflow_validation": {
+    "yaml": "parsed",
+    "python_helpers": "parsed",
+    "embedded_python": "parsed",
+    "ipa_audit": "structural fixture passed; real new IPA not produced"
+  },
+  "new_ipa_produced": false,
+  "deferred": [
+    "Physical controller interception/remapping",
+    "Adaptive render scaling",
+    "Display zoom/panning",
+    "Custom touch calibration",
+    "Custom cover artwork/themes",
+    "Two simultaneous virtual sticks",
+    "Advanced multi-finger mouse gestures",
+    "Distributed automatic compatibility recipes",
+    "Native module downloading",
+    "Encrypted-game key support",
+    "Raw memory scanning and save-format conversion"
+  ],
+  "limits_document": "docs/player-improvements.md",
+  "archive_indexing": "Direct ZIP directory positions avoid per-asset name scans; native tests verify entry identity and reject mismatches."
+}

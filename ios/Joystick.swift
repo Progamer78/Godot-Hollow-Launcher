@@ -16,6 +16,14 @@ struct JoystickEditor: View {
                 Text(joystick.mode == "floating" ? "The stick appears where you touch and follows your drag. Other control buttons stay available. Floating mode uses screen drags, so mouse mode is off." : "Drag the joystick in the control editor to choose its position.")
                     .font(.caption).foregroundColor(.secondary)
                 Section(header: Text("Direction inputs")) {
+                    Picker("Output", selection: Binding(get: { joystick.output ?? "keyboard" }, set: { joystick.output = $0 == "gamepad" ? "gamepad" : nil })) {
+                        Text("Keyboard directions").tag("keyboard"); Text("Analog gamepad").tag("gamepad")
+                    }
+                    if joystick.output == "gamepad" {
+                        Picker("Stick", selection: Binding(get: { joystick.axis ?? 0 }, set: { joystick.axis = $0 })) {
+                            Text("Left stick").tag(0); Text("Right stick").tag(2)
+                        }
+                    }
                     Button("Use arrow keys") { joystick.up = "Up"; joystick.down = "Down"; joystick.left = "Left"; joystick.right = "Right" }
                     Button("Use WASD") { joystick.up = "W"; joystick.down = "S"; joystick.left = "A"; joystick.right = "D" }
                     keyPicker("Up", key: $joystick.up)
@@ -73,6 +81,7 @@ final class JoystickTouchView: UIView {
         addSubview(ring); addSubview(knob)
         accessibilityLabel = "Virtual joystick"
         NotificationCenter.default.addObserver(self, selector: #selector(cancelTouch), name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(cancelTouch), name: Notification.Name("GodotPlayerReleaseInputs"), object: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     deinit { NotificationCenter.default.removeObserver(self) }
@@ -102,14 +111,23 @@ final class JoystickTouchView: UIView {
         let radius = CGFloat(configuration.diameter * 0.34)
         let dx = point.x - origin.x, dy = point.y - origin.y
         let distance = hypot(dx, dy), scale = distance > radius ? radius / distance : 1
-        let next = configuration.keys(dx: Double(dx / radius), dy: Double(dy / radius))
-        for key in held.subtracting(next) { PlayerRuntime.setKey(key, pressed: false) }
-        for key in next.subtracting(held) { PlayerRuntime.setKey(key, pressed: true) }
+        let next = configuration.output == "gamepad" ? Set<String>() : configuration.keys(dx: Double(dx / radius), dy: Double(dy / radius))
+        if configuration.output == "gamepad" {
+            let axes = configuration.analog(dx: Double(dx / radius), dy: Double(dy / radius))
+            GameInput.axis(configuration.axis ?? 0, value: axes.0)
+            GameInput.axis((configuration.axis ?? 0) + 1, value: axes.1)
+        }
+        for key in held.subtracting(next) { GameInput.key(key, pressed: false) }
+        for key in next.subtracting(held) { GameInput.key(key, pressed: true) }
         held = next
         drawStick(offset: CGPoint(x: dx * scale, y: dy * scale))
     }
     @objc func cancelTouch() {
-        for key in held { PlayerRuntime.setKey(key, pressed: false) }
+        if configuration.output == "gamepad" {
+            GameInput.axis(configuration.axis ?? 0, value: 0)
+            GameInput.axis((configuration.axis ?? 0) + 1, value: 0)
+        }
+        for key in held { GameInput.key(key, pressed: false) }
         held.removeAll(); activeTouch = nil
         drawStick(offset: .zero)
     }

@@ -106,6 +106,9 @@ enum PCKInspector {
             if major == 4 && ![100, 101].contains(version) {
                 throw PackError.invalid("\(path) uses unsupported compiled GDScript version \(version). This player reads formats 100 and 101. The pack has not been launched, to avoid an engine crash.")
             }
+            if major == 3 && version > 13 {
+                throw PackError.invalid("\(path) needs newer compiled scripts than Godot 3.6.3 can read. For APK assets, check the engine-family hint; Godot 4 scripts cannot run in Godot 3.")
+            }
         }
         if let (offset, length) = binarySettings {
             guard length >= 4 else { throw PackError.invalid("Truncated project.binary.") }

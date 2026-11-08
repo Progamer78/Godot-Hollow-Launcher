@@ -19,6 +19,11 @@ class PlayerTools : public PlayerToolsBase {
     GDCLASS(PlayerTools, PlayerToolsBase);
     struct Change { Dictionary target; Variant before; Variant after; };
     Vector<Change> history;
+    Array frozen;
+    Array number_candidates;
+    bool numeric_only = false;
+    int virtual_pad = -1;
+    int original_fps = -1;
     bool owns_pause = false;
     bool previous_pause = false;
     uint64_t paused_tree = 0;
@@ -34,10 +39,13 @@ class PlayerTools : public PlayerToolsBase {
     bool resolve(const Dictionary &target, Object *&owner, Array &path, Variant &value, String &error);
     bool write(Object *owner, const Array &path, int index, Variant &value, const Variant &replacement);
     Dictionary scan(const String &search);
-    Dictionary edit(const Dictionary &request);
+    Dictionary edit(const Dictionary &request, bool record = true);
     Dictionary undo();
     Dictionary pause(bool enabled);
     Dictionary evaluate(const String &code);
+    Dictionary input(const Dictionary &command);
+    Dictionary options(const Dictionary &command);
+    Dictionary find_numbers(const Dictionary &command);
     static Dictionary failure(const String &message);
     static SceneTree *tree();
 

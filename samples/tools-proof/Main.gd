@@ -8,6 +8,11 @@ var stats = {"wallet": {"money": 40}, "levels": [1, 2, 3], 9223372036854775807: 
 var stats_resource
 var tools
 var checks = 0
+var typed_codes = []
+
+func _input(event):
+    if event is InputEventKey and event.pressed:
+        typed_codes.append(event.unicode)
 
 func _ready():
     call_deferred("run_checks")
@@ -91,5 +96,44 @@ func run_checks():
     check(wire_edit.ok and stats_resource.money == 9223372036854775807, "JSON transport preserves 64-bit object IDs and values")
     var wire_undo = JSON.parse_string(tools.transport(JSON.stringify({"action": "undo"})))
     check(wire_undo.ok and stats_resource.money == 321, "JSON session undo persists between requests")
+    money = 50
+    var candidates = tools.request({"action": "find_numbers", "comparison": "exact", "value": "50"})
+    check(candidates.ok and candidates.rows.size() == 1, "numeric search finds live exact value")
+    money = 51
+    candidates = tools.request({"action": "refine_numbers", "comparison": "increased"})
+    check(candidates.rows.size() == 1 and candidates.rows[0].value == "51", "numeric search narrows by increase")
+    check(tools.request({"action": "freeze", "target": candidates.rows[0], "value": "60"}).ok, "freeze initial edit succeeds")
+    money = 1
+    tools.request({"action": "tick"})
+    check(money == 60, "freeze tick restores desired value")
+    tools.request({"action": "clear_freezes"})
+    money = 2
+    tools.request({"action": "tick"})
+    check(money == 2, "cleared freeze stops writing")
+    var fps_property = "max_fps" if Engine.get_version_info().major >= 4 else "target_fps"
+    var previous_fps = Engine.get(fps_property)
+    check(tools.request({"action": "options", "fps": 30}).ok and Engine.get(fps_property) == 30, "frame cap changes actual engine setting")
+    tools.request({"action": "options", "fps": 0})
+    check(Engine.get(fps_property) == previous_fps, "default restores original game cap")
+    check(tools.request({"action": "options", "speed": 0.5}).ok and Engine.time_scale == 0.5, "speed changes actual engine time scale")
+    tools.request({"action": "options", "speed": 1.0})
+    check(not tools.request({"action": "options", "speed": 0.0}).ok, "unsafe speed rejected")
+    check(tools.request({"action": "input", "kind": "axis", "axis": 0, "value": 0.4}).ok, "analog event accepted")
+    Input.flush_buffered_events()
+    var devices = Input.get_connected_joypads()
+    var device = devices[devices.size() - 1]
+    check(abs(Input.get_joy_axis(device, 0) - 0.4) < 0.01, "game receives intermediate analog strength")
+    check(tools.request({"action": "input", "kind": "button", "button": 0, "pressed": true}).ok, "virtual controller button accepted")
+    Input.flush_buffered_events()
+    check(Input.is_joy_button_pressed(device, 0), "game receives virtual controller button")
+    tools.request({"action": "release_input"})
+    Input.flush_buffered_events()
+    check(Input.get_joy_axis(device, 0) == 0 and not Input.is_joy_button_pressed(device, 0), "focus release clears analog and gamepad holds")
+    check(not tools.request({"action": "input", "kind": "axis", "axis": 99, "value": 0}).ok, "invalid axis refused")
+    check(tools.request({"action": "input", "kind": "text", "text": "Aé🙂"}).ok, "Unicode text events accepted")
+    Input.flush_buffered_events()
+    check(typed_codes.size() >= 3 and typed_codes[typed_codes.size() - 3] == 65 and typed_codes[typed_codes.size() - 2] == 233 and typed_codes[typed_codes.size() - 1] == 128578, "scene receives full Unicode text key events")
+    var objects = tools.request({"action": "objects"})
+    check(objects.ok and objects.rows.size() >= 2, "browser lists real scene objects")
     print("PLAYER_TOOLS_PROOF PASS checks=", checks)
     get_tree().quit()

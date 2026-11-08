@@ -317,6 +317,9 @@ class BuildToolsTests(unittest.TestCase):
             data = plistlib.loads(info.read_bytes())
             self.assertTrue(data["UIFileSharingEnabled"])
             self.assertEqual(data["MinimumOSVersion"], "15.0")
+            declared = {item["UTTypeIdentifier"] for item in data["UTImportedTypeDeclarations"]}
+            self.assertTrue({"org.godotengine.pck", "org.godotplayer.apk", "org.godotplayer.embedded-pack"}.issubset(declared))
+            self.assertIn("org.godotplayer.apk", data["CFBundleDocumentTypes"][0]["LSItemContentTypes"])
             self.assertIn("UIInterfaceOrientationPortrait", data["UISupportedInterfaceOrientations"])
             self.assertNotIn("NSCameraUsageDescription", data)
             self.assertNotIn("godot_cmdline", data)

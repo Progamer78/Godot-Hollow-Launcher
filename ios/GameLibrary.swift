@@ -14,6 +14,15 @@ struct Game: Codable, Identifiable {
     var controlProfile: ControlProfile?
     var allowNativeFallback: Bool?
     var orientation: String?
+    var favorite: Bool?
+    var collection: String?
+    var notes: String?
+    var lastPlayed: Date?
+    var playedSeconds: Double?
+    var importNote: String?
+    var frameLimit: Int?
+    var savedCheats: [SavedCheat]?
+    var displayInset: Double?
     var displayOrientation: String {
         let value = orientation ?? "automatic"
         return ["portrait", "landscape"].contains(value) ? value : "automatic"
@@ -51,6 +60,7 @@ final class GameLibrary: ObservableObject {
     @Published private(set) var games: [Game] = []
     @Published var error: String?
     @Published var importing = false
+    @Published private(set) var pendingImport: ImportCandidate?
     private var manifestUsable = true
     private let files = FileManager.default
     let root: URL
@@ -77,7 +87,7 @@ final class GameLibrary: ObservableObject {
     func packURL(_ game: Game) -> URL { directory(game.id).appendingPathComponent("game.pck") }
     func saveURL(_ game: Game) -> URL { saves.appendingPathComponent(game.id.uuidString) }
 
-    private func persist(_ updated: [Game]) throws {
+    func persist(_ updated: [Game]) throws {
         guard manifestUsable else { throw PackError.invalid("The library manifest needs recovery before changes can be saved.") }
         try JSONEncoder().encode(updated).write(to: manifest, options: .atomic)
         games = updated
@@ -109,57 +119,95 @@ final class GameLibrary: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
-    func importPack(_ source: URL, replacing existing: Game? = nil) {
-        guard !importing else { return }
+    func importPack(_ source: URL, replacing existing: Game? = nil, engineHint: UInt32? = nil) {
+        guard !importing, pendingImport == nil else { return }
         guard manifestUsable else { error = "The library manifest needs recovery before importing."; return }
         importing = true
         let staging = root.appendingPathComponent("import-\(UUID().uuidString).pck")
         DispatchQueue.global(qos: .userInitiated).async {
             let access = source.startAccessingSecurityScopedResource()
             defer { if access { source.stopAccessingSecurityScopedResource() } }
-            let result: Result<PackInfo, Error> = Result {
-                guard source.isFileURL, source.pathExtension.lowercased() == "pck" else { throw PackError.invalid("Choose a standalone .pck file.") }
+            let result: Result<(PackInfo, String?), Error> = Result {
+                guard source.isFileURL, PackageImport.extensions.contains(source.pathExtension.lowercased()) else { throw PackError.invalid("Choose a PCK, ZIP, APK, or embedded-PCK EXE.") }
                 var coordinationError: NSError?
                 var copyError: Error?
+                var note: String?
                 NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { readable in
                     do {
                         let values = try readable.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
                         guard values.isRegularFile == true, values.isSymbolicLink != true else { throw PackError.invalid("The selected item is not a regular file.") }
-                        try self.files.copyItem(at: readable, to: staging)
+                        note = try PackageImport.prepare(readable, destination: staging, engineHint: engineHint)
                     } catch { copyError = error }
                 }
                 if let error = coordinationError { throw error }
                 if let error = copyError { throw error }
-                return try PCKInspector.inspect(staging)
+                let info = try PCKInspector.inspect(staging)
+                return (info, note)
             }
             DispatchQueue.main.async {
-                defer { self.importing = false; try? self.files.removeItem(at: staging) }
+                defer { self.importing = false }
                 do {
-                    let info = try result.get()
-                    var game = existing ?? Game(id: UUID(), name: source.deletingPathExtension().lastPathComponent, pack: info)
-                    game.pack = info
-                    try self.files.createDirectory(at: self.directory(game.id), withIntermediateDirectories: true)
-                    let destination = self.packURL(game)
-                    let backup = self.directory(game.id).appendingPathComponent("previous.pck")
-                    if existing != nil {
-                        // Atomic replacement leaves the old pack intact on a failed copy.
-                        if self.files.fileExists(atPath: backup.path) { try self.files.removeItem(at: backup) }
-                        _ = try self.files.replaceItemAt(destination, withItemAt: staging, backupItemName: "previous.pck", options: .withoutDeletingBackupItem)
-                    } else {
-                        try self.files.moveItem(at: staging, to: destination)
+                    let (info, note) = try result.get()
+                    if let game = existing {
+                        self.pendingImport = ImportCandidate(game: game, pack: info, note: note, staging: staging)
+                        return
                     }
-                    do {
-                        try self.persist(existing == nil ? self.games + [game] : self.games.map { $0.id == game.id ? game : $0 })
-                    } catch {
-                        if existing != nil, self.files.fileExists(atPath: backup.path) {
-                            _ = try? self.files.replaceItemAt(destination, withItemAt: backup)
-                        } else if existing == nil {
-                            try? self.files.removeItem(at: self.directory(game.id))
-                        }
-                        throw error
-                    }
-                    try? self.files.removeItem(at: backup)
-                } catch { self.error = "Import failed: \(error.localizedDescription)" }
+                    defer { try? self.files.removeItem(at: staging) }
+                    try self.install(staging: staging, info: info, note: note, name: source.deletingPathExtension().lastPathComponent, existing: nil)
+                } catch { try? self.files.removeItem(at: staging); self.error = "Import failed: \(error.localizedDescription)" }
+            }
+        }
+    }
+
+    private func install(staging: URL, info: PackInfo, note: String?, name: String, existing: Game?) throws {
+        var game: Game
+        if let existing = existing {
+            guard let current = games.first(where: { $0.id == existing.id }) else { throw PackError.invalid("The game was removed while importing.") }
+            game = current
+            if current.pack.major != info.major { game.runtime = "automatic"; game.renderer = "project" }
+        } else { game = Game(id: UUID(), name: name, pack: info) }
+        game.pack = info
+        game.importNote = note
+        try self.files.createDirectory(at: self.directory(game.id), withIntermediateDirectories: true)
+        let destination = self.packURL(game)
+        let backup = self.directory(game.id).appendingPathComponent("previous.pck")
+        if existing != nil {
+            // Atomic replacement leaves the old pack intact on a failed copy.
+            if self.files.fileExists(atPath: backup.path) { try self.files.removeItem(at: backup) }
+            _ = try self.files.replaceItemAt(destination, withItemAt: staging, backupItemName: "previous.pck", options: .withoutDeletingBackupItem)
+        } else {
+            try self.files.moveItem(at: staging, to: destination)
+        }
+        do {
+            try self.persist(existing == nil ? self.games + [game] : self.games.map { $0.id == game.id ? game : $0 })
+        } catch {
+            if existing != nil, self.files.fileExists(atPath: backup.path) {
+                _ = try? self.files.replaceItemAt(destination, withItemAt: backup)
+            } else if existing == nil {
+                try? self.files.removeItem(at: self.directory(game.id))
+            }
+            throw error
+        }
+        try? self.files.removeItem(at: backup)
+    }
+
+
+    func cancelImport() {
+        guard !importing else { return }
+        if let pending = pendingImport { try? files.removeItem(at: pending.staging) }
+        pendingImport = nil
+    }
+    func confirmImport() {
+        guard !importing, let pending = pendingImport else { return }
+        importing = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try self.vault.backup(pending.game.id, label: "Automatic: before game replacement") }
+            DispatchQueue.main.async {
+                defer { self.importing = false; self.pendingImport = nil; try? self.files.removeItem(at: pending.staging) }
+                do {
+                    _ = try result.get()
+                    try self.install(staging: pending.staging, info: pending.pack, note: pending.note, name: pending.game.name, existing: pending.game)
+                } catch { self.error = "Replacement failed: \(error.localizedDescription)" }
             }
         }
     }
@@ -171,5 +219,31 @@ final class GameLibrary: ObservableObject {
         checked.pack = info
         if let reason = RuntimeSelection.problem(for: checked) { throw PackError.invalid(reason) }
         try files.createDirectory(at: saveURL(game), withIntermediateDirectories: true)
+        _ = try vault.backup(game.id, label: "Automatic: before launch")
     }
+
+    var vault: SaveVault { SaveVault(root: root.appendingPathComponent("Backups"), saves: saves) }
+    func journal(_ game: Game, status: String) {
+        do {
+            try JSONEncoder().encode(LaunchJournal(status: status, date: Date())).write(to: directory(game.id).appendingPathComponent("launch.json"), options: .atomic)
+        } catch { self.error = "Could not record launch status: \(error.localizedDescription)" }
+    }
+    func previousLaunch(_ game: Game) -> LaunchJournal? {
+        guard let data = try? Data(contentsOf: directory(game.id).appendingPathComponent("launch.json")) else { return nil }
+        return try? JSONDecoder().decode(LaunchJournal.self, from: data)
+    }
+    func markPlayed(_ id: UUID, seconds: Double = 0) {
+        guard var game = games.first(where: { $0.id == id }) else { return }
+        game.lastPlayed = Date(); game.playedSeconds = (game.playedSeconds ?? 0) + max(0, seconds)
+        update(game)
+    }
+}
+
+struct LaunchJournal: Codable { let status: String; let date: Date }
+struct ImportCandidate: Identifiable {
+    let id = UUID()
+    let game: Game
+    let pack: PackInfo
+    let note: String?
+    let staging: URL
 }

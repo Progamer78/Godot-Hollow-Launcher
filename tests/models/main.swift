@@ -109,3 +109,80 @@ let statReloaded = try JSONDecoder().decode(ToolStat.self, from: JSONEncoder().e
 require(statReloaded == stat && statReloaded.id == stat.id, "Stat references round trip without changing paths")
 require(decoded.pack.scriptVersions == nil, "Old manifests must migrate without script-version metadata")
 print("Control profile migration, persisted layouts, key mappings, save preservation and compatibility gating passed")
+
+// Archive importer and save-vault checks run with the actual native MiniZip
+// bridge on macOS, including streamed APK wrapping and ordinary ZIP exchange.
+do {
+    let archiveRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: archiveRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: archiveRoot) }
+    let gameID = UUID(), savesRoot = archiveRoot.appendingPathComponent("Saves")
+    let gameSaves = savesRoot.appendingPathComponent(gameID.uuidString)
+    try FileManager.default.createDirectory(at: gameSaves, withIntermediateDirectories: true)
+    let save = gameSaves.appendingPathComponent("save.json")
+    try Data("{\"money\":55}".utf8).write(to: save)
+    try Data("private diagnostic text".utf8).write(to: gameSaves.appendingPathComponent("player.log"))
+    try FileManager.default.createDirectory(at: gameSaves.appendingPathComponent("shader_cache"), withIntermediateDirectories: true)
+    try Data("rebuildable GPU cache".utf8).write(to: gameSaves.appendingPathComponent("shader_cache/test.bin"))
+    try FileManager.default.createDirectory(at: gameSaves.appendingPathComponent("slots/empty"), withIntermediateDirectories: true)
+    let vault = SaveVault(root: archiveRoot.appendingPathComponent("Backups"), saves: savesRoot)
+    let original = try vault.backup(gameID, label: "Manual")
+    require(original.bytes == 12, "Save backups must omit logs and rebuildable shader caches")
+    try Data("{\"money\":99}".utf8).write(to: save)
+    try vault.restore(gameID, snapshot: original)
+    let restored = try String(contentsOf: save, encoding: .utf8)
+    require(restored.contains("55"), "Restore must recover original progress")
+    require(FileManager.default.fileExists(atPath: gameSaves.appendingPathComponent("slots/empty").path), "Backup restoration must retain empty save directories")
+    let restoreHistory = try vault.snapshots(gameID)
+    require(restoreHistory.count == 2, "Restore must also preserve the replaced progress")
+    let zip = archiveRoot.appendingPathComponent("saves.zip")
+    try vault.export(gameID, to: zip)
+    try Data("{\"money\":1}".utf8).write(to: save)
+    try vault.importArchive(gameID, source: zip)
+    let importedPreview = try vault.preview(gameID, name: "save.json")
+    require(importedPreview.contains("55"), "Save ZIP transfer round trips original bytes")
+    require(FileManager.default.fileExists(atPath: gameSaves.appendingPathComponent("slots/empty").path), "Save ZIP transfer must retain empty directories")
+    for _ in 0..<7 { _ = try vault.backup(gameID, label: "Automatic: test") }
+    let automatic = try vault.snapshots(gameID).filter { $0.label.hasPrefix("Automatic:") }
+    require(automatic.count == 5, "Automatic retention keeps five; manual backups are separate")
+    try vault.restore(gameID, snapshot: automatic[automatic.count - 1])
+    let restoredOldest = try vault.preview(gameID, name: "save.json")
+    require(restoredOldest.contains("55"), "Restoring the oldest automatic backup must stage it before retention prunes it")
+    let link = gameSaves.appendingPathComponent("escape")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: archiveRoot)
+    do { _ = try vault.backup(gameID, label: "Must refuse symlink"); fatalError("Unsafe save links accepted") } catch {}
+    try FileManager.default.removeItem(at: link)
+    let project = archiveRoot.appendingPathComponent("project.godot")
+    try Data("config_version=4\n".utf8).write(to: project)
+    let apk = archiveRoot.appendingPathComponent("legacy.apk")
+    try GPArchive.create(apk.path, files: [project.path], names: ["assets/project.godot"])
+    let wrapped = archiveRoot.appendingPathComponent("legacy.pck")
+    _ = try PackageImport.prepare(apk, destination: wrapped)
+    let legacy = try PCKInspector.inspect(wrapped)
+    require(legacy.major == 3 && legacy.format == 1, "Plaintext Godot 3 APK assets use the matching pack family")
+    let executable = archiveRoot.appendingPathComponent("game.exe")
+    let bytes = try Data(contentsOf: wrapped)
+    var size = UInt64(bytes.count).littleEndian
+    var embedded = Data("not an executable; original test fixture\n".utf8) + bytes
+    embedded += withUnsafeBytes(of: &size) { Data($0) }; embedded += Data("GDPC".utf8)
+    try embedded.write(to: executable)
+    let extracted = archiveRoot.appendingPathComponent("extracted.pck")
+    _ = try PackageImport.prepare(executable, destination: extracted)
+    let extractedBytes = try Data(contentsOf: extracted)
+    require(extractedBytes == bytes, "Embedded-PCK import must preserve every pack byte")
+    let apk4 = URL(fileURLWithPath: "build/archive-tests/movement-assets.apk")
+    if FileManager.default.fileExists(atPath: apk4.path) {
+        let output = URL(fileURLWithPath: "build/archive-tests/imported-apk.pck")
+        _ = try PackageImport.prepare(apk4, destination: output, engineHint: 4)
+        let metadata = try PCKInspector.inspect(output)
+        require(metadata.major == 4 && metadata.nativeFiles == nil, "APK import must omit non-asset Android native libraries")
+    }
+    for name in ControlProfile.presetNames {
+        var preset = ControlProfile.preset(name); preset.constrain()
+        let migrated = try JSONDecoder().decode(ControlProfile.self, from: JSONEncoder().encode(preset))
+        require(migrated == preset, "Shared presets and optional input/accessibility fields must round trip")
+    }
+    let analog = JoystickControl().analog(dx: 0.7, dy: 0)
+    require(analog.0 > 0 && analog.0 < 1 && analog.1 == 0, "Analog sticks retain intermediate strength")
+}
+print("Native archives, APK assets, embedded PCKs, save backup/restore/transfer/retention and analog/control presets passed")

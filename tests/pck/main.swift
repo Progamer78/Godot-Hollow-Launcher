@@ -63,25 +63,31 @@ try optionalNative.write(to: nativeURL)
 let nativeInfo = try PCKInspector.inspect(nativeURL)
 precondition(nativeInfo.nativeFiles?.count == 2, "Native dependencies must be reported rather than silently ignored")
 
-func compiledFixture(version: UInt32) -> Data {
+func compiledFixture(version: UInt32, major: UInt32 = 4) -> Data {
+    let headerSize = major == 3 ? 84 : 96
     let files: [(String, Data)] = [
-        ("project.godot", Data("config_version=5\n".utf8)),
+        ("project.godot", Data("config_version=\(major == 3 ? 4 : 5)\n".utf8)),
         ("Main.gdc", Data("GDSC".utf8) + u32(version) + u32(0))
     ]
-    let directorySize = 4 + files.reduce(0) { $0 + 4 + $1.0.utf8.count + 36 }
+    let directorySize = 4 + files.reduce(0) { $0 + 4 + $1.0.utf8.count + (major == 3 ? 32 : 36) }
     var directory = u32(UInt32(files.count)), payload = Data()
     for (name, bytes) in files {
         directory += u32(UInt32(name.utf8.count)) + Data(name.utf8)
-        directory += u64(UInt64(96 + directorySize + payload.count)) + u64(UInt64(bytes.count)) + Data(repeating: 0, count: 16) + u32(0)
+        directory += u64(UInt64(headerSize + directorySize + payload.count)) + u64(UInt64(bytes.count)) + Data(repeating: 0, count: 16)
+        if major != 3 { directory += u32(0) }
         payload += bytes
     }
-    var header = u32(0x43504447) + u32(2) + u32(4) + u32(4) + u32(1) + u32(0) + u64(0)
-    header += Data(repeating: 0, count: 96 - header.count)
+    var header = u32(0x43504447) + u32(major == 3 ? 1 : 2) + u32(major) + u32(4) + u32(1)
+    if major != 3 { header += u32(0) + u64(0) }
+    header += Data(repeating: 0, count: headerSize - header.count)
     return header + directory + payload
 }
 try check(compiledFixture(version: 100), valid: true, "legacy compiled script header")
 try check(compiledFixture(version: 101), valid: true, "current compiled script header")
 try check(compiledFixture(version: 102), valid: false, "future bytecode rejected before engine startup")
+try check(compiledFixture(version: 13, major: 3), valid: true, "Godot 3 current bytecode accepted")
+try check(compiledFixture(version: 14, major: 3), valid: false, "Godot 3 future bytecode refused")
+try check(compiledFixture(version: 100, major: 3), valid: false, "Wrong APK family hint refused before engine startup")
 try check(fixture(extraPaths: ["Main.gdc"]), valid: false, "invalid compiled script signature")
 let legacyCompiledURL = dir.appendingPathComponent("compiled.pck")
 try compiledFixture(version: 100).write(to: legacyCompiledURL)

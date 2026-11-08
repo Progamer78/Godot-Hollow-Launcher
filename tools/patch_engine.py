@@ -4,7 +4,7 @@ import argparse
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH_REVISION = "legacy-scripts-limbo-live-tools-v6"
+PATCH_REVISION = "imports-save-vault-controls-tools-v7"
 
 
 def replace(path, old, new):
@@ -28,7 +28,7 @@ def patch(engine):
     original = app.read_text(encoding="utf-8")
     app.write_text(original[:original.index("import SwiftUI")] + "// Entry point provided by PlayerApp.swift.\n", encoding="utf-8")
     with (apple / "bridging_header_apple_embedded.h").open("a", encoding="utf-8") as header:
-        header.write('\n#import "PlayerRuntime.h"\n')
+        header.write('\n#import "PlayerRuntime.h"\n#import "ArchiveSupport.h"\n')
     # Match the exported Xcode target's Swift language mode. These launcher
     # sources use explicit dispatch queues and do not require Swift 6 isolation.
     replace(engine / "platform_methods.py", '"-swift-version",\n        "6",', '"-swift-version",\n        "5",')

@@ -37,11 +37,17 @@ def prepare(export, library, spine_license=None, compatibility_license=None):
     data.pop("godot_cmdline", None)
     data["CFBundleDocumentTypes"] = [{
         "CFBundleTypeName": "Godot Pack", "LSHandlerRank": "Alternate",
-        "LSItemContentTypes": ["org.godotengine.pck"],
+        "LSItemContentTypes": ["org.godotengine.pck", "public.zip-archive", "org.godotplayer.apk", "org.godotplayer.embedded-pack"],
     }]
     data["UTImportedTypeDeclarations"] = [{
         "UTTypeIdentifier": "org.godotengine.pck", "UTTypeDescription": "Godot Resource Pack",
         "UTTypeConformsTo": ["public.data"], "UTTypeTagSpecification": {"public.filename-extension": ["pck"]},
+    }, {
+        "UTTypeIdentifier": "org.godotplayer.apk", "UTTypeDescription": "Godot Android Package Data",
+        "UTTypeConformsTo": ["public.data"], "UTTypeTagSpecification": {"public.filename-extension": ["apk"]},
+    }, {
+        "UTTypeIdentifier": "org.godotplayer.embedded-pack", "UTTypeDescription": "Embedded Godot Pack Data",
+        "UTTypeConformsTo": ["public.data"], "UTTypeTagSpecification": {"public.filename-extension": ["exe"]},
     }]
     info.write_bytes(plistlib.dumps(data))
     # The scaffold exists only to obtain the upstream Xcode project. No launcher
