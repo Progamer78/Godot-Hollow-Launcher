@@ -1,4 +1,6 @@
 #import "PlayerRuntime.h"
+#import "Godot3API.h"
+#include <dlfcn.h>
 #import "app_delegate_service.h"
 #import "godot_app_delegate.h"
 #import "godot_view_controller.h"
@@ -11,6 +13,7 @@
 #include "core/object/class_db.h"
 #include "core/string/print_string.h"
 #include "modules/modules_enabled.gen.h"
+#include "modules/player_tools/player_tools.h"
 #ifdef MODULE_SPINE_GODOT_ENABLED
 #include "modules/spine_godot/spine-cpp/include/spine/Version.h"
 #endif
@@ -26,6 +29,8 @@ BOOL player_engine_ready = NO;
 BOOL player_main_started = NO;
 static NSString *requested_renderer;
 static BOOL attempted = NO;
+static const GP3API *godot3 = nullptr;
+NSString *player_orientation = nil;
 static NSMutableDictionary<NSString *, NSNumber *> *held_keys;
 static NSMutableDictionary<NSNumber *, NSNumber *> *held_mouse;
 static BitField<MouseButtonMask> mouse_buttons;
@@ -35,6 +40,18 @@ static bool previous_touch_from_mouse = false;
 static CFTimeInterval last_motion = 0;
 static CFTimeInterval last_left_click = 0;
 static Vector2 last_click_position;
+
+@interface GDTApplicationDelegate (PlayerOrientation)
+- (UIInterfaceOrientationMask)application:(UIApplication *)application supportedInterfaceOrientationsForWindow:(UIWindow *)window;
+@end
+
+@implementation GDTApplicationDelegate (PlayerOrientation)
+- (UIInterfaceOrientationMask)application:(UIApplication *)application supportedInterfaceOrientationsForWindow:(UIWindow *)window {
+    if ([player_orientation isEqualToString:@"portrait"]) return UIInterfaceOrientationMaskPortrait;
+    if ([player_orientation isEqualToString:@"landscape"]) return UIInterfaceOrientationMaskLandscape;
+    return UIInterfaceOrientationMaskPortrait | UIInterfaceOrientationMaskLandscape;
+}
+@end
 
 static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
     NSInteger count = [holds[key] integerValue];
@@ -46,7 +63,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 @implementation PlayerRuntime
-+ (UIViewController *)startPack:(NSString *)packPath savePath:(NSString *)savePath renderer:(NSString *)renderer error:(NSError **)error {
++ (UIViewController *)startPack:(NSString *)packPath savePath:(NSString *)savePath renderer:(NSString *)renderer engineMajor:(NSInteger)major orientation:(NSString *)orientation error:(NSError **)error {
     NSAssert([NSThread isMainThread], @"Godot starts on the main thread");
     NSString *reason = nil;
     if (attempted) reason = @"A runtime has already started. Close the app from the app switcher and reopen it to select a game.";
@@ -56,6 +73,21 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
         return nil;
     }
     attempted = YES;
+    player_orientation = [orientation copy];
+    if (major == 3) {
+        NSString *path = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"Godot3Runtime.framework/Godot3Runtime"];
+        void *image = dlopen(path.fileSystemRepresentation, RTLD_NOW | RTLD_LOCAL);
+        GP3GetAPIFunction getAPI = image ? (GP3GetAPIFunction)dlsym(image, "GP3GetAPI") : nullptr;
+        const GP3API *api = getAPI ? getAPI() : nullptr;
+        if (!api || api->version != 2) {
+            const char *detail = dlerror();
+            NSString *message = [NSString stringWithFormat:@"The bundled Godot 3 runtime could not load: %s. Make sure your signing tool signs embedded frameworks.", detail ?: "missing or incompatible runtime bridge"];
+            if (error) *error = [NSError errorWithDomain:@"GodotPlayer" code:30 userInfo:@{NSLocalizedDescriptionKey:message}];
+            return nil;
+        }
+        godot3 = api; // Deliberately retained until process exit; never dlclose.
+        return godot3->start(packPath, savePath, renderer, orientation, error);
+    }
     player_save_path = [savePath copy];
     requested_renderer = [renderer copy];
     held_keys = [NSMutableDictionary new];
@@ -88,6 +120,25 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
     return controller;
 }
 
++ (double)gameAspectRatio {
+    if (godot3) return godot3->aspectRatio();
+    if (!ProjectSettings::get_singleton()) return 16.0 / 9.0;
+    double width = GLOBAL_GET("display/window/size/viewport_width");
+    double height = GLOBAL_GET("display/window/size/viewport_height");
+    if (width <= 0 || height <= 0) {
+        width = GLOBAL_GET("display/window/size/window_width_override");
+        height = GLOBAL_GET("display/window/size/window_height_override");
+    }
+    return width > 0 && height > 0 ? width / height : 16.0 / 9.0;
+}
+
++ (NSString *)toolsRequest:(NSString *)json {
+    NSAssert(NSThread.isMainThread, @"Game tools run on the engine thread");
+    if (godot3) return godot3->tools(json);
+    String response = PlayerTools::dispatch_json(String::utf8(json.UTF8String));
+    return [NSString stringWithUTF8String:response.utf8().get_data()];
+}
+
 + (void)logRuntimeConfiguration {
     print_line("Godot Player: requested renderer = " + String::utf8([requested_renderer UTF8String]));
 #ifdef MODULE_SPINE_GODOT_ENABLED
@@ -96,6 +147,8 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
     print_line("Godot Player: Spine runtime is not bundled");
 #endif
     print_line(String("Godot Player: SpineSprite registered = ") + (ClassDB::class_exists("SpineSprite") ? "yes" : "no"));
+    print_line(String("Godot Player: built-in LimboAI BTPlayer registered = ") + (ClassDB::class_exists("BTPlayer") ? "yes" : "no"));
+    print_line("Godot Player: compiled GDScript tokenizer formats = 100, 101");
 }
 
 + (NSString *)launchFailureMessage {
@@ -114,7 +167,9 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
         }
     }
     NSString *reason = @"The game's main scene could not load. It may require missing resources, native classes, or a different runtime.";
-    if ([text containsString:@"Spine"]) {
+    if ([text containsString:@"Binary GDScript"] || [text containsString:@"Unsupported binary GDScript tokenizer"]) {
+        reason = @"This game's compiled scripts could not be read by the runtime. See player.log for the script format or parsing error.";
+    } else if ([text containsString:@"Spine"] && ([text containsString:@"Cannot get class 'Spine"] || [text containsString:@"Could not find type \"Spine"] || [text containsString:@"SpineSkeletonDataResource' is not"])) {
         reason = ClassDB::class_exists("SpineSprite")
             ? @"The game's Spine animation resources could not load. Its exported Spine version may differ from the version bundled in this player."
             : @"This game requires the Spine animation runtime, which is not included in this player build. Changing the renderer cannot add the missing animation classes.";
@@ -123,6 +178,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 + (void)setKey:(NSString *)key pressed:(BOOL)pressed {
+    if (godot3) { godot3->key(key, pressed); return; }
     if (!Input::get_singleton() || !held_keys) return;
     if ([key isEqualToString:@"Mouse Left"]) { [self setMouseButton:1 pressed:pressed]; return; }
     if ([key isEqualToString:@"Mouse Right"]) { [self setMouseButton:2 pressed:pressed]; return; }
@@ -152,11 +208,13 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 + (void)releaseKeys {
+    if (godot3) { godot3->releaseInputs(); return; }
     for (NSString *key in [held_keys allKeys]) { held_keys[key] = @1; [self setKey:key pressed:NO]; }
     for (NSNumber *button in [held_mouse allKeys]) { held_mouse[button] = @1; [self setMouseButton:button.integerValue pressed:NO]; }
 }
 
 + (void)setMouseEnabled:(BOOL)enabled {
+    if (godot3) { godot3->mouseEnabled(enabled); return; }
     Input *input = Input::get_singleton();
     if (!input) return;
     if (mouse_enabled == enabled) {
@@ -183,6 +241,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 + (void)moveMouse:(CGPoint)point fromView:(UIView *)source relative:(BOOL)relative {
+    if (godot3) { godot3->moveMouse(point, source, relative); return; }
     Input *input = Input::get_singleton();
     if (!input || !mouse_enabled) return;
     UIView *view = GDTAppDelegateService.viewController.godotView;
@@ -216,6 +275,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 + (CGPoint)mousePositionInView:(UIView *)target {
+    if (godot3) return godot3->mousePosition(target);
     Input *input = Input::get_singleton();
     if (!input) return CGPointZero;
     UIView *view = GDTAppDelegateService.viewController.godotView;
@@ -225,6 +285,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 + (void)setMouseButton:(NSInteger)button pressed:(BOOL)pressed {
+    if (godot3) { godot3->mouseButton(button, pressed); return; }
     Input *input = Input::get_singleton();
     if (!input || button < 1 || button > 3 || !held_mouse) return;
     if (!change_hold(held_mouse, @(button), pressed)) return;
@@ -252,6 +313,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 + (void)scrollMouse:(NSInteger)direction {
+    if (godot3) { godot3->scroll(direction); return; }
     Input *input = Input::get_singleton();
     if (!input) return;
     for (bool pressed : { true, false }) {
@@ -268,11 +330,13 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 + (BOOL)mouseCaptured {
+    if (godot3) return godot3->captured();
     auto *display = DisplayServerAppleEmbedded::get_singleton();
     return display && display->player_get_effective_mouse_mode() == DisplayServerEnums::MOUSE_MODE_CAPTURED;
 }
 
 + (BOOL)mouseCursorVisible {
+    if (godot3) return godot3->cursorVisible();
     auto *display = DisplayServerAppleEmbedded::get_singleton();
     if (!display) return NO;
     auto mode = display->player_get_effective_mouse_mode();
@@ -280,11 +344,13 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 + (NSUInteger)mouseCursorRevision {
+    if (godot3) return 1;
     auto *display = DisplayServerAppleEmbedded::get_singleton();
     return display ? display->player_get_cursor_revision() : 0;
 }
 
 + (UIImage *)mouseCursorImage {
+    if (godot3) return nil;
     auto *display = DisplayServerAppleEmbedded::get_singleton();
     if (!display) return nil;
     Ref<Image> image = display->player_get_cursor_image();
@@ -295,6 +361,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 + (CGPoint)mouseCursorHotspot {
+    if (godot3) return CGPointZero;
     auto *display = DisplayServerAppleEmbedded::get_singleton();
     if (!display) return CGPointZero;
     Vector2 hotspot = display->player_get_cursor_hotspot();

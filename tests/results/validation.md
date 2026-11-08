@@ -1,5 +1,35 @@
 # Validation recorded November 7, 2026
 
+## Compatibility and game tools update - November 8
+
+The user's supplied Coffee/Lili failures are from the preceding working player, not the untried Godot 3/joystick/portrait update. The new combined package includes both sets of changes.
+
+Captive Lili reproduced an access violation in stock 4.7.2 after rejecting its 500 v100 compiled scripts. Legacy header/token translation and pinned built-in LimboAI 1.8.1 now allow its unchanged PCK to execute for 180 frames headlessly and 180 frames with native OpenGL in the compiled 4.7.2 desktop runtime: exit 0, no script errors or bytecode rejection. The graphics window was positioned offscreen; visual correctness/full gameplay were not assessed. Certificate-store and shutdown resource/texture leak messages remain.
+
+Coffee's 96 GDEC-encrypted scripts all match their PCK directory MD5 values. A normal startup attempt in compiled Godot 3.6.3 + Spine 4.2 with the standard engine key produces decryption failures and 72 error messages, including required autoload failures. Exit code 0 does NOT mean the game ran. It remains unplayable without a suitable unencrypted export/matching-key runtime; native dependencies may require further work. No key extraction or PCK rewriting was performed. Import errors now explain the encryption blocker and count.
+
+Both complete Windows release engines compiled with the shared PlayerTools module, and **48 native checks pass in each (96 total)** using original standalone test PCKs. They verify real live scalar/nested edits, 64-bit values/IDs/keys, type/stale-object/overflow/non-finite guards, undo, pause restoration, expressions and the JSON transport used by the app. Compiled module bytes match the current workspace source. The custom Godot 3 engine also starts the original Sadiubus PCK with exit 0 and no script errors.
+
+Seven Python tests pass against real upstream patch anchors and staging/export fixtures. YAML and embedded Python parse successfully. New Swift inspector/model/tool-transport cases are configured in Actions but have not run locally. **The new iOS adapters/UI/framework have not compiled/run here and no new IPA was produced.** See `compatibility-cheats.json` and `docs/game-tools.md` for exact evidence, limitations and build/device steps.
+
+Earlier results follow.
+
+
+## Godot 3 / joystick / portrait update ? November 8
+
+The user reports the preceding Godot 4/Spine/floating-menu player working on iPhone. This update adds the isolated Godot 3 framework/bridge, fixed and floating keyboard sticks, saved orientation preferences and portrait aspect fitting. It preserves the original game PCKs and the existing Godot 4 export/archive process.
+
+The supplied official ARM64 static archives were inspected with LLVM's Mach-O tools. They share 18,264 defined external symbols. The new design separates engine images, prefixes 17 Godot 3 Objective-C class/protocol names, and exports only a versioned bridge; the real exported-symbol/Objective-C metadata audits run at CI link/package time.
+
+Actual Windows execution: official, checksum-verified Godot 3.6.3 started the unchanged Sadiubus PCK (3.4.2 metadata, format 1, 1,927 entries) with exit 0 and no script errors. `samples/godot3` was exported to a standalone PCK and run twice from an empty directory for 90 frames per launch; input, movement and save reload passed (loaded counts 0 then 1). Those runs use the official desktop engine, not the new iOS adapter.
+
+Six Python tests pass, covering the real 3.6.3/4.7.2 patch anchors, export preservation, Spine staging/version guards and the framework collision-check fixture. YAML and embedded Python parse successfully. New Swift migration/joystick/portrait/runtime-selection tests and complete iOS launcher type-checking are configured in Actions. Swift is unavailable locally, so those new Swift cases have not run.
+
+**No new ARM64 framework, iOS launcher or IPA has compiled/been produced here.** Windows has no Xcode/iOS SDK. Native integration, code signing and actual Godot 3 execution in the same installed IPA as Godot 4 remain pending. Joystick multitouch/release behavior, portrait click coordinates, audio focus and save persistence need device testing. See `godot3-joystick-portrait.json` for concise evidence and `docs/godot3.md` for the implementation and acceptance steps.
+
+The following sections describe earlier validation history.
+
+
 ## Spine build repair
 
 The latest supplied GitHub Actions logs passed all 256 PCK inspector checks, the control-profile migration/persistence/save-preservation tests, and iPhone Swift type-checking. Compilation stopped in the new Spine module on missing `callable_mp` and `RS` declarations, followed by cascading `SpineMesh2D` errors.

@@ -7,7 +7,7 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def prepare(export, library, spine_license=None):
+def prepare(export, library, spine_license=None, compatibility_license=None):
     notices = [
         ("GodotEngineNotices", (ROOT / "licenses/GODOT-LICENSE.txt").read_text(encoding="utf-8") + "\n" +
          (ROOT / "licenses/GODOT-COPYRIGHT.txt").read_text(encoding="utf-8")),
@@ -17,6 +17,8 @@ def prepare(export, library, spine_license=None):
         if "Spine Runtimes License Agreement" not in license_text:
             raise RuntimeError("Missing or invalid Spine runtime license notice.")
         notices.append(("SpineRuntimeNotices", license_text))
+    if compatibility_license is not None:
+        notices.append(("LimboAIRuntimeNotices", compatibility_license.read_text(encoding="utf-8")))
     # The known-working exporter creates this name from player.xcodeproj.
     target = export / "player.xcframework/ios-arm64/libgodot.a"
     if not target.is_file():
@@ -26,6 +28,7 @@ def prepare(export, library, spine_license=None):
     shutil.copy2(library, target)
     info = export / "player/player-Info.plist"
     data = plistlib.loads(info.read_bytes())
+    data["MinimumOSVersion"] = "15.0"
     for permission in ["NSCameraUsageDescription", "NSMicrophoneUsageDescription", "NSPhotoLibraryUsageDescription"]:
         data.pop(permission, None)
     data["UISupportedInterfaceOrientations"] = ["UIInterfaceOrientationPortrait", "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]
@@ -61,5 +64,6 @@ if __name__ == "__main__":
     parser.add_argument("export", type=Path)
     parser.add_argument("library", type=Path)
     parser.add_argument("--spine-license", type=Path)
+    parser.add_argument("--compatibility-license", type=Path)
     args = parser.parse_args()
-    prepare(args.export.resolve(), args.library.resolve(), args.spine_license)
+    prepare(args.export.resolve(), args.library.resolve(), args.spine_license, args.compatibility_license)

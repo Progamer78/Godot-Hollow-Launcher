@@ -1,0 +1,99 @@
+{
+  "date": "2026-11-08",
+  "baseline": "User reports these failures on the preceding working Godot 4/Spine player; Godot 3/joystick/portrait update remains untried.",
+  "coffee": {
+    "pack_engine": "3.6.0",
+    "pack_bytes": 1903140032,
+    "file_count": 55317,
+    "encrypted_scripts": 96,
+    "encrypted_file_md5_checks_matching_directory": 96,
+    "spine_data": "4.2.43 samples; SpineSprite and SpineSkeletonDataResource used in scenes.",
+    "godot3_spine_build": "Complete desktop 3.6.3 + Spine 4.2 + PlayerTools compiled.",
+    "normal_default_key_attempt": {
+      "process_exit": 0,
+      "errors": 72,
+      "result": "UNPLAYABLE: encrypted autoloads/main-game scripts fail decryption. Exit 0 does not establish successful startup."
+    },
+    "status": "Still blocked by encryption; clearer import error implemented. No export keys extracted and no PCK content modified."
+  },
+  "tools": {
+    "native_checks": [
+      {
+        "engine_major": 3,
+        "checks_passed": 48,
+        "runtime": "locally compiled official release plus PlayerTools",
+        "result": "passed",
+        "ios_ui": "not tested"
+      },
+      {
+        "engine_major": 4,
+        "checks_passed": 48,
+        "runtime": "locally compiled official release plus PlayerTools",
+        "result": "passed",
+        "ios_ui": "not tested"
+      }
+    ],
+    "total_native_checks": 96,
+    "source_sha256": "3a5743c9a6ed91fe40e7c90331fc2c57a68f1b567605d0297111619d769218a8",
+    "compiled_sources_match_workspace": true,
+    "features": [
+      "Script stat discovery in scene/autoloads/resources/dictionaries/arrays",
+      "Typed scalar edits, 64-bit IDs/integers, finite-number validation",
+      "20-change undo with stale-object/type-change/progress guards",
+      "Pause/restoration and actual Godot expression execution",
+      "JSON bridge shared by Godot 3 and Godot 4"
+    ],
+    "limitations": [
+      "Live edits persist only when the game saves.",
+      "No universal stat mapping, automatic save invocation or stat freezing.",
+      "Bounded discovery; native/static/computed/custom state may not appear.",
+      "Expression console is not the editor debugger or a full GDScript REPL."
+    ]
+  },
+  "sadiubus_regression": {
+    "exit_code": 0,
+    "script_errors": 0,
+    "runtime": "locally compiled Godot 3.6.3 with PlayerTools and Spine 4.2",
+    "startup_only": true
+  },
+  "python_tests_passed": 7,
+  "new_swift_tests": "Added; not run on Windows.",
+  "new_ios_native_build": "Not performed; no Xcode/iOS SDK on Windows.",
+  "new_ipa_produced": false,
+  "required_device_validation": [
+    "Actions Swift tests and type-check; ARM64 builds of both runtimes/framework; signing",
+    "Previously working Godot 4 games and Captive Lili launch",
+    "Godot 3 execution in the same installed IPA",
+    "Tools UI edits/undo/console, touch/joystick/portrait/lifecycle/save checks"
+  ],
+  "captive_lili": {
+    "pack_engine": "4.4.1",
+    "bytes": 393522496,
+    "compiled_scripts": 500,
+    "tokenizer_version": 100,
+    "original_stock_4_7_2": "Reproduced access violation after tokenizer rejection and missing LimboAI extension.",
+    "implemented_fix": "In-memory v100 header/token-ID compatibility; pinned built-in LimboAI 1.8.1; native imported libraries remain blocked.",
+    "limboai_revision": "e45e60e976dafab7f2c15cc341ae366e4cf3352b",
+    "verified": {
+      "headless": {
+        "exit_code": 0,
+        "seconds": 4.38,
+        "script_errors": 0,
+        "unsupported_bytecode_errors": 0,
+        "frames_requested": 180,
+        "pack_unchanged": true,
+        "limbo_builtin_log": true
+      },
+      "opengl": {
+        "exit_code": 0,
+        "seconds": 10.52,
+        "script_errors": 0,
+        "unsupported_bytecode_errors": 0,
+        "frames_requested": 180,
+        "pack_unchanged": true,
+        "limbo_builtin_log": true
+      }
+    },
+    "remaining": "Visual correctness, full gameplay, iPhone rendering and save behavior untested; certificate-store and shutdown resource/texture leak messages remain."
+  }
+}

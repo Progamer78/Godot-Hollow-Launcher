@@ -96,7 +96,7 @@ def adapt_godot47(module):
             path.write_text(updated, encoding="utf-8")
 
 
-def prepare(engine, source, version, report, notice, *, verify_revision=True):
+def prepare(engine, source, version, report, notice, *, verify_revision=True, engine_major=4):
     if version not in REVISIONS:
         raise ValueError(f"Unsupported Spine runtime version: {version}")
     target = engine / "modules/spine_godot"
@@ -129,7 +129,10 @@ def prepare(engine, source, version, report, notice, *, verify_revision=True):
             raise RuntimeError("Official Spine runtime license is missing.")
         shutil.copytree(module, target)
         shutil.copytree(cpp, target / "spine-cpp")
-        adapt_godot47(target)
+        if engine_major == 4:
+            adapt_godot47(target)
+        elif engine_major != 3:
+            raise ValueError("Spine staging supports Godot 3 or 4 only")
         # Upstream places the module beside its engine checkout. We put it in
         # modules/ so Godot's normal module discovery and registration apply.
         (target / "SCsub").write_text(scsub.replace(old_include, "#modules/spine_godot/spine-cpp/include"), encoding="utf-8")
@@ -137,12 +140,13 @@ def prepare(engine, source, version, report, notice, *, verify_revision=True):
         notice.parent.mkdir(parents=True, exist_ok=True)
         notice.write_text(license_text, encoding="utf-8")
         metadata["classes"] = list(REQUIRED_CLASSES)
-        metadata["godot_compatibility"] = COMPATIBILITY_REVISION
+        metadata["godot_compatibility"] = COMPATIBILITY_REVISION if engine_major == 4 else "upstream-godot3-api"
+        metadata["engine_major"] = engine_major
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     print(f"Bundled Spine: {version} ({REVISIONS[version] or 'disabled'})")
     if version != "none":
-        print(f"Spine engine adaptation: {COMPATIBILITY_REVISION}")
+        print(f"Spine engine adaptation: {metadata['godot_compatibility']}")
     return metadata
 
 
@@ -151,7 +155,8 @@ if __name__ == "__main__":
     parser.add_argument("engine", type=Path)
     parser.add_argument("source", type=Path)
     parser.add_argument("--version", choices=REVISIONS, default="4.2")
+    parser.add_argument("--engine-major", type=int, choices=[3, 4], default=4)
     parser.add_argument("--report", type=Path, default=Path("build/spine-build.json"))
     parser.add_argument("--notice", type=Path, default=Path("build/SPINE-RUNTIMES-LICENSE.txt"))
     args = parser.parse_args()
-    prepare(args.engine.resolve(), args.source.resolve(), args.version, args.report, args.notice)
+    prepare(args.engine.resolve(), args.source.resolve(), args.version, args.report, args.notice, engine_major=args.engine_major)

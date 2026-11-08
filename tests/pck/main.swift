@@ -62,11 +62,46 @@ let nativeURL = dir.appendingPathComponent("native.pck")
 try optionalNative.write(to: nativeURL)
 let nativeInfo = try PCKInspector.inspect(nativeURL)
 precondition(nativeInfo.nativeFiles?.count == 2, "Native dependencies must be reported rather than silently ignored")
+
+func compiledFixture(version: UInt32) -> Data {
+    let files: [(String, Data)] = [
+        ("project.godot", Data("config_version=5\n".utf8)),
+        ("Main.gdc", Data("GDSC".utf8) + u32(version) + u32(0))
+    ]
+    let directorySize = 4 + files.reduce(0) { $0 + 4 + $1.0.utf8.count + 36 }
+    var directory = u32(UInt32(files.count)), payload = Data()
+    for (name, bytes) in files {
+        directory += u32(UInt32(name.utf8.count)) + Data(name.utf8)
+        directory += u64(UInt64(96 + directorySize + payload.count)) + u64(UInt64(bytes.count)) + Data(repeating: 0, count: 16) + u32(0)
+        payload += bytes
+    }
+    var header = u32(0x43504447) + u32(2) + u32(4) + u32(4) + u32(1) + u32(0) + u64(0)
+    header += Data(repeating: 0, count: 96 - header.count)
+    return header + directory + payload
+}
+try check(compiledFixture(version: 100), valid: true, "legacy compiled script header")
+try check(compiledFixture(version: 101), valid: true, "current compiled script header")
+try check(compiledFixture(version: 102), valid: false, "future bytecode rejected before engine startup")
+try check(fixture(extraPaths: ["Main.gdc"]), valid: false, "invalid compiled script signature")
+let legacyCompiledURL = dir.appendingPathComponent("compiled.pck")
+try compiledFixture(version: 100).write(to: legacyCompiledURL)
+let legacyCompiledInfo = try PCKInspector.inspect(legacyCompiledURL)
+precondition(legacyCompiledInfo.scriptVersions == [100], "Bytecode versions must be recorded independently of engine metadata")
+let encryptedURL = dir.appendingPathComponent("encrypted.pck")
+try fixture(extraPaths: ["addons/example.gde", "game/Main.gde"]).write(to: encryptedURL)
+do {
+    _ = try PCKInspector.inspect(encryptedURL)
+    fatalError("Encrypted scripts cannot be accepted without an export key")
+} catch {
+    let reason = error.localizedDescription
+    precondition(reason.contains("2 encrypted scripts") && reason.contains("export encryption key") && reason.contains("game/Main.gde"), "Encryption errors must describe the actual pack blocker")
+}
+checks += 2
 let good = fixture()
 for length in 0..<good.count { try check(good.prefix(length), valid: false, "truncated \(length)") }
 for file in CommandLine.arguments.dropFirst() {
     let info = try PCKInspector.inspect(URL(fileURLWithPath: file))
-    precondition(info.major == 4 && info.fileCount > 0)
+    precondition([3, 4].contains(info.major) && info.fileCount > 0)
     print("Real PCK accepted: \(file), Godot \(info.version), format \(info.format)")
     checks += 1
 }

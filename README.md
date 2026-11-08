@@ -1,12 +1,34 @@
 # Native Godot Player for iOS
 
-The player has been built through GitHub Actions, installed on an iPhone, and used to run independently imported games. The user also reports the mouse/control update working, apart from its intrusive toolbar. **The new floating menu, Spine integration, and startup-failure handling require a new CI build and iPhone test.**
+The preceding Godot 4/Spine player is reported working on iPhone. The user has not yet tried the Godot 3/joystick/portrait update. **The latest package includes that update, Captive Lili compatibility fixes, Godot 3 Spine support, and a live stats/cheats menu with an expression console. Its new iOS code still needs Actions compilation and device validation.** Both desktop runtimes compile and pass the native tools tests.
 
 The launcher imports complete PCKs through Files and initializes the selected pack as Godot's **main project**. It does not mount games inside a Godot launcher project. The first adapter uses official Godot **4.7.2-stable**, revision `ed1daf0bf001b61586d9930840f2f1394092c079`.
 
 Implemented source includes persistent UUID-based imports, directory validation, rename/delete, replacement while retaining saves, version metadata, runtime selection checks, renderer selection, editable key overlays, virtual mouse input, launch diagnostics, and a per-game `user://` path. Native rendering, audio, touch, keyboards, controller handling, and lifecycle continue through upstream Godot code.
 
 Only one game can initialize per process. To choose another game, close the app from the iOS app switcher and reopen it. There is no subprocess, forced exit, simulated game execution, or assumed mobile restart API.
+
+## Latest compatibility and cheats update
+
+Extract `build/checkpoints/GodotPlayer-Compatibility-Cheats-Update.zip` and upload **all its contents** at your existing GitHub repository root, preserving paths. Include **.github**, **bootstrap**, **ios**, **runtime3**, the new **runtime_shared**, **tools**, **tests**, **samples**, and **docs**. This combined package includes the previous untried update. Run **Build native Godot Player**, keeping Spine **4.2**. The patcher reports `legacy-scripts-limbo-live-tools-v6`. Sign the IPA and embedded framework, then install over the existing app with the same identifier/identity to preserve saves. Requires iOS 15+.
+
+Captive Lili's unchanged PCK now starts in a locally compiled Godot 4.7.2 runtime for 180 frames headlessly and with native OpenGL, with no script errors. Its old compiled-script format is translated in memory, and LimboAI is built into the engine. Full gameplay and iPhone rendering remain untested. Anomalous Coffee Machine remains blocked: its 96 encrypted game scripts do not decrypt with the standard engine key, despite matching the PCK checksums. The import error now explains that clearly; this player cannot run this encrypted copy. Godot 3 and Spine support alone cannot remove encryption.
+
+While playing, open **⋯ → Game Tools · Cheats & Console**. Search for money, coins, health or other variable names, tap a value, and Apply. Nested dictionaries, arrays and script resources are supported. Pause/resume and guarded undo are included. The Console evaluates expressions against the scene root; it is not the editor's remote debugger. Edits persist when the game saves. Availability depends on how the game stores its state. See [usage, validation and remaining limits](docs/game-tools.md).
+
+Both complete Windows release runtimes compiled with the shared tools module. **48 native checks passed in each engine (96 total)**, including the JSON bridge, 64-bit values/IDs, nested edits, undo, pause, expressions and stale/type-changed objects. Seven Python tests pass. The new Swift UI/model/inspector cases and ARM64 builds must run in Actions; no new IPA has been produced locally.
+
+## Godot 3, joysticks and portrait update
+
+These features are included in the latest combined package above. Both engines are bundled at build time; import packs after installation as before. Do not upload reference games or templates.
+
+Godot 3 uses a separate bundled `Godot3Runtime.framework`, selected automatically for a Godot 3 PCK. The framework exports one versioned UIKit bridge, hides engine symbols, prefixes Objective-C classes/protocols, and stays loaded for the process lifetime. Godot 4 retains its existing engine image. Neither engine is downloaded by the app. Native libraries from imported games remain disabled. See [Godot 3 implementation and validation](docs/godot3.md).
+
+While playing, open the menu, then **Edit Controls**, then **Add Joystick**. Choose **Fixed** or **Floating**, arrow keys/WASD or individual direction mappings, size and deadzone; tap **Apply**, then **Save**. Drag a fixed joystick in the layout editor to position it. Floating mode appears at a touch and handles drags across the control area; buttons and the menu stay above it. It reserves those drags, so mouse mode is off. Turning mouse mode on changes a floating joystick to fixed without deleting its settings. **Hide Controls** hides buttons and the stick together.
+
+Before Play, choose **Portrait (Fit)**, **Landscape**, or **Rotate automatically** under **Orientation** in game details. Portrait fits the original game aspect ratio inside the available view with no cropping. Landscape uses the existing full rendering area. The original game pack and its project settings are not rewritten. Orientation is saved per game; iOS rotation lock can still affect automatic rotation. The minimum device OS is now iOS 15.
+
+Sign and install using the same app identifier/identity as the working version. Your signing tool must sign **embedded frameworks**, including `Godot3Runtime.framework`. Install over the existing app to retain the library and saves. Test a Godot 4 game first, then close/reopen the process and import `Sadiubus_x64.pck`; no rebuild is needed between games. The build artifact also includes an original Godot 3 test PCK with input/animation/save checks. Both runtimes must pass on the same installed IPA before multi-version device support is considered verified.
 
 ## Verified locally on Windows
 
@@ -17,7 +39,7 @@ Only one game can initialize per process. To choose another game, close the app 
 - Supplied `I Can Smell You From Here.pck` initialized headlessly, reported 97 dialogue nodes and successful game-data validation, then exited normally. Its gameplay was not tested.
 - Python build-tool tests pass against the actual official release sources and an export-preparation fixture.
 
-The earlier macOS GitHub Actions runs compiled the Swift pack inspector and passed all 253 original checks, including malformed/truncated files and the real sample packs. Both desktop PCK proofs also passed on macOS. After the export fixes, the user reports that two games work on the actual iPhone. Specific save-isolation, controller, and lifecycle scenarios still need separate device verification. The latest Swift tests add native-component warnings, old-manifest migration, saved controls, and compatibility gating; these additions run in CI and have not been executed from Windows.
+The earlier macOS GitHub Actions runs compiled the Swift pack inspector and passed all 253 original checks, including malformed/truncated files and the real sample packs. Both desktop PCK proofs also passed on macOS. After the export fixes, the user reports that two games work on the actual iPhone. Specific save-isolation, controller, and lifecycle scenarios still need separate device verification. Swift checks run in macOS CI. New cases cover old control-profile migration, joystick persistence/deadzones, runtime-major selection and portrait fitting; these new Swift cases have not run from Windows.
 
 The unmodified Pokémon Battle Advanced 0.3.3 PCK also reached its boot scene on Windows Godot 4.7.2 with no script/parse errors, using headless and graphical Compatibility runs. Its unavailable WebRTC backend and shutdown errors remain in the logs. This establishes desktop startup, not complete gameplay or iPhone compatibility.
 
@@ -31,9 +53,11 @@ See [test evidence](tests/results/validation.md), [reference inspection](docs/re
 4. It uses the reference's existing `godot --export-release → xcodebuild archive → Payload ZIP` sequence. The custom runtime replaces only the exported ARM64 library. Exported framework links and Xcode source structure are preserved.
 5. Download `GodotPlayer-build-and-tests`. A successful archive includes `GodotPlayer-unsigned.ipa`, both sample PCKs, and logs.
 
-For the current update, extract `build/checkpoints/GodotPlayer-Floating-Menu-Spine-Update.zip` and upload its contents at the GitHub repository root using **Add file → Upload files**. Include the `.github`, `ios`, `tools`, `tests`, `docs`, and `licenses` folders, preserving their paths. The build executes `tools/patch_engine.py`, not a copy at the root. Commit the upload and run the workflow. The patch step should report `floating-menu-spine-v4`.
+For the current update, use the Godot 3 / joystick / portrait upload instructions above. The patch step reports `dual-runtime-joystick-portrait-v5`.
 
 Sign the new IPA with the same app identifier and sideloading identity as the installed player, then install it as an update. Avoid uninstalling the existing app if you want to retain its library and saves.
+
+If the Spine build failed with missing `callable_mp` / `RS` declarations, use `build/checkpoints/GodotPlayer-Spine-Build-Fix.zip`. Upload its **tools** and **tests** folders at the repository root, keeping files inside those folders, then run the same workflow with Spine **4.2**. The staging step must print `Spine engine adaptation: godot-4.7-module-api-v1`. The fix adapts the pinned Spine source to Godot 4.7's explicit headers, rendering namespaces, animation-library container, and reference-counted allocation rules. All 100 Spine C++ files and a complete Godot 4.7.2 Windows runtime compiled locally. That runtime started the unchanged Goodbye Eternity Mac PCK for 90 headless frames, exit 0 with zero script errors. This does not establish an iOS archive/device result.
 
 ## Mouse and saved controls
 
@@ -96,7 +120,7 @@ The initial custom build contains Metal and OpenGL ES. Vulkan is disabled to avo
 
 ## Sign and install
 
-For Xcode installation, select the `player` target, set a unique bundle identifier, enable automatic signing, choose your Apple development team and connected iPhone, then **Product → Run**. The dummy team in `bootstrap/export_presets.cfg` is only for unsigned project generation.
+For Xcode installation, first build the Godot 3 framework as described in [docs/godot3.md](docs/godot3.md) and add it to the target with **Embed & Sign**. Then select the `player` target, set a unique bundle identifier, enable automatic signing, choose your Apple development team and connected iPhone, then **Product → Run**. The dummy team in `bootstrap/export_presets.cfg` is only for unsigned project generation.
 
 To distribute a signed IPA through Xcode, select a physical-device destination, **Product → Archive**, then **Distribute App** with the development/ad-hoc method available to your account. Provide the provisioning profile for that bundle identifier and device. Never commit signing keys or provisioning credentials.
 

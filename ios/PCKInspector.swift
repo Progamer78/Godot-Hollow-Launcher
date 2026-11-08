@@ -8,6 +8,7 @@ struct PackInfo: Codable, Equatable {
     let fileCount: UInt32
     let byteCount: UInt64
     var nativeFiles: [String]?
+    var scriptVersions: [UInt32]?
     var version: String { "\(major).\(minor).\(patch)" }
 }
 
@@ -52,6 +53,9 @@ enum PCKInspector {
         var binarySettings: (UInt64, UInt64)?
         var ranges: [(UInt64, UInt64)] = []
         var nativeFiles: [String] = []
+        var encryptedScripts = 0
+        var encryptedExample = ""
+        var compiledScripts: [(UInt64, UInt64, String)] = []
         for _ in 0..<count {
             let length = try reader.u32()
             guard length > 0, length <= 16_384 else { throw PackError.invalid("Invalid PCK path length.") }
@@ -74,9 +78,12 @@ enum PCKInspector {
             if path == "project.binary" { binarySettings = (base + offset, size) }
             if path == "project.godot", size == 0 { throw PackError.invalid("Empty project settings file.") }
             let ext = (path as NSString).pathExtension.lowercased()
-            guard !["gde", "cs"].contains(ext) else {
-                throw PackError.invalid("\(path) is an encrypted script or .NET source, which this runtime does not support.")
+            if ext == "gde" {
+                encryptedScripts += 1
+                if encryptedExample.isEmpty || encryptedExample.hasPrefix("addons/") { encryptedExample = path }
             }
+            if ext == "cs" { throw PackError.invalid("\(path) requires a .NET runtime, which is not included in this player.") }
+            if ext == "gdc" { compiledScripts.append((base + offset, size, path)) }
             if ["gdextension", "gdnlib", "dll", "so", "dylib"].contains(ext), nativeFiles.count < 32 { nativeFiles.append(path) }
         }
         let directoryEnd = reader.position
@@ -86,12 +93,26 @@ enum PCKInspector {
             }
         }
         guard hasProject else { throw PackError.invalid("No project settings found. This is a resource-only or incomplete pack.") }
+        if encryptedScripts > 0 {
+            throw PackError.invalid("This Godot \(major) pack contains \(encryptedScripts) encrypted scripts (.gde), including \(encryptedExample). This player cannot decrypt them without the game's export encryption key. Use an unencrypted game export; changing the renderer or adding Godot 3 support cannot remove encryption.")
+        }
+        var versions = Set<UInt32>()
+        for (offset, length, path) in compiledScripts {
+            guard length >= 12 else { throw PackError.invalid("Truncated compiled script: \(path)") }
+            try reader.seek(offset)
+            guard try reader.read(4) == Data("GDSC".utf8) else { throw PackError.invalid("Invalid compiled script signature: \(path)") }
+            let version = try reader.u32()
+            versions.insert(version)
+            if major == 4 && ![100, 101].contains(version) {
+                throw PackError.invalid("\(path) uses unsupported compiled GDScript version \(version). This player reads formats 100 and 101. The pack has not been launched, to avoid an engine crash.")
+            }
+        }
         if let (offset, length) = binarySettings {
             guard length >= 4 else { throw PackError.invalid("Truncated project.binary.") }
             try reader.seek(offset)
             guard try reader.read(4) == Data("ECFG".utf8) else { throw PackError.invalid("Invalid project.binary signature.") }
         }
-        return PackInfo(format: format, major: major, minor: minor, patch: patch, fileCount: count, byteCount: reader.size, nativeFiles: nativeFiles.isEmpty ? nil : nativeFiles)
+        return PackInfo(format: format, major: major, minor: minor, patch: patch, fileCount: count, byteCount: reader.size, nativeFiles: nativeFiles.isEmpty ? nil : nativeFiles, scriptVersions: versions.isEmpty ? nil : versions.sorted())
     }
 }
 

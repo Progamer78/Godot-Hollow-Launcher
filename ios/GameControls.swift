@@ -4,8 +4,51 @@ import QuartzCore
 
 private struct EngineView: UIViewControllerRepresentable {
     let controller: UIViewController
-    func makeUIViewController(context: Context) -> UIViewController { controller }
+    let ratio: Double
+    let orientation: String
+    func makeUIViewController(context: Context) -> UIViewController {
+        PlayerGameContainer(engine: controller, ratio: ratio, orientation: orientation)
+    }
     func updateUIViewController(_ controller: UIViewController, context: Context) {}
+}
+
+private final class PlayerGameContainer: UIViewController {
+    let engine: UIViewController
+    let ratio: Double
+    let orientation: String
+    init(engine: UIViewController, ratio: Double, orientation: String) {
+        self.engine = engine; self.ratio = ratio; self.orientation = orientation
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        addChild(engine); view.addSubview(engine.view); engine.didMove(toParent: self)
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let bounds = view.bounds
+        let area = bounds.height > bounds.width ? view.safeAreaLayoutGuide.layoutFrame : bounds
+        let fitted = GameViewport.frame(width: Double(area.width), height: Double(area.height), aspect: ratio)
+        engine.view.frame = CGRect(x: area.minX + CGFloat(fitted.x), y: area.minY + CGFloat(fitted.y),
+                                   width: CGFloat(fitted.width), height: CGFloat(fitted.height))
+    }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if #available(iOS 16.0, *) {
+            view.window?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            let mask: UIInterfaceOrientationMask = orientation == "portrait" ? .portrait : (orientation == "landscape" ? .landscape : [.portrait, .landscape])
+            view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                NSLog("Player orientation request: %@", error.localizedDescription)
+            }
+        } else { UIViewController.attemptRotationToDeviceOrientation() }
+    }
+    override var shouldAutorotate: Bool { true }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        orientation == "portrait" ? .portrait : (orientation == "landscape" ? .landscape : [.portrait, .landscape])
+    }
+    override var prefersStatusBarHidden: Bool { true }
 }
 
 struct GameScreen: View {
@@ -18,6 +61,8 @@ struct GameScreen: View {
     @State private var original: ControlProfile?
     @State private var originalVisibility = true
     @State private var selected: ControlButton?
+    @State private var editingJoystick = false
+    @State private var showingTools = false
     @State private var controlArea = CGSize.zero
     @State private var needsInitialLayout: Bool
     @State private var menuOpen = false
@@ -35,7 +80,7 @@ struct GameScreen: View {
 
     var body: some View {
         ZStack {
-            EngineView(controller: session.controller)
+            EngineView(controller: session.controller, ratio: session.aspectRatio, orientation: session.game.displayOrientation)
                 .ignoresSafeArea()
                 .allowsHitTesting(!editing && !profile.mouseEnabled)
             if profile.mouseEnabled && !editing {
@@ -44,6 +89,7 @@ struct GameScreen: View {
             if editing { Color.black.opacity(0.18).ignoresSafeArea() }
             GeometryReader { area in
                 ZStack {
+                    if let stick = profile.joystick, showButtons || editing { joystick(stick, in: area.size) }
                     if showButtons || editing {
                         ForEach(profile.buttons) { button in
                             control(button, in: area.size)
@@ -66,6 +112,16 @@ struct GameScreen: View {
                 selected = nil
             }, onCancel: { selected = nil })
         }
+        .sheet(isPresented: $editingJoystick) {
+                JoystickEditor(joystick: profile.joystick ?? JoystickControl(), onSave: { updated in
+                    profile.joystick = updated
+                    if updated.mode == "floating" { profile.mouseEnabled = false }
+                    editingJoystick = false
+                }, onDelete: { profile.joystick = nil; editingJoystick = false }, onCancel: { editingJoystick = false })
+        }
+        .sheet(isPresented: $showingTools, onDismiss: {
+            PlayerRuntime.setMouseEnabled(profile.mouseEnabled && !editing)
+        }) { GameTools() }
         .onAppear { PlayerRuntime.setMouseEnabled(profile.mouseEnabled && !editing) }
         .onDisappear { PlayerRuntime.releaseKeys(); PlayerRuntime.setMouseEnabled(false) }
         .onChange(of: phase) { if $0 != .active { PlayerRuntime.releaseKeys() } }
@@ -74,7 +130,7 @@ struct GameScreen: View {
     private var menuContents: some View {
         VStack(alignment: .leading, spacing: 12) {
             if editing {
-                Text("Drag buttons to move them. Tap one to change its key, label or size.").font(.caption)
+                Text("Drag controls to move them. Tap one to edit its inputs or size.").font(.caption)
                 HStack(spacing: 14) {
                     Button("Cancel") { cancelEdit() }
                     Button("Add Button") {
@@ -83,9 +139,6 @@ struct GameScreen: View {
                         profile.buttons.append(button)
                         selected = button
                     }.disabled(profile.buttons.count >= 32)
-                    Button("Reset Layout") {
-                        resetButtons()
-                    }
                     Button("Save") {
                         if library.saveControls(profile, visible: showButtons, for: session.id) {
                             editing = false
@@ -95,9 +148,15 @@ struct GameScreen: View {
                         }
                     }
                 }
+                HStack(spacing: 14) {
+                    Button(profile.joystick == nil ? "Add Joystick" : "Edit Joystick") {
+                        editingJoystick = true
+                    }
+                    Button("Reset Buttons") { resetButtons() }
+                }
             } else {
                 HStack(spacing: 16) {
-                    Button(showButtons ? "Hide Buttons" : "Show Buttons") {
+                    Button(showButtons ? "Hide Controls" : "Show Controls") {
                         PlayerRuntime.releaseKeys()
                         if library.saveControls(profile, visible: !showButtons, for: session.id) {
                             showButtons.toggle()
@@ -107,12 +166,16 @@ struct GameScreen: View {
                     Button(profile.mouseEnabled ? "Mouse: On" : "Mouse: Off") {
                         var updated = profile
                         updated.mouseEnabled.toggle()
+                        if updated.mouseEnabled && updated.joystick?.mode == "floating" { updated.joystick?.mode = "fixed" }
                         if library.saveControls(updated, visible: showButtons, for: session.id) {
                             profile = updated
                             PlayerRuntime.setMouseEnabled(profile.mouseEnabled)
                             menuOpen = false
                         }
                     }
+                }
+                if profile.joystick?.mode == "floating" {
+                    Text("Floating joystick: drag anywhere outside the buttons and menu. Mouse mode is off.").font(.caption)
                 }
                 Button("Edit Controls") {
                     PlayerRuntime.releaseKeys()
@@ -121,6 +184,12 @@ struct GameScreen: View {
                     originalVisibility = showButtons
                     editing = true
                 }
+                Button {
+                    PlayerRuntime.releaseKeys()
+                    PlayerRuntime.setMouseEnabled(false)
+                    menuOpen = false
+                    showingTools = true
+                } label: { Label("Game Tools · Cheats & Console", systemImage: "slider.horizontal.3") }
                 if profile.mouseEnabled {
                     HStack(spacing: 16) {
                         Button(profile.mouseMode == "trackpad" ? "Trackpad" : "Direct Touch") {
@@ -150,6 +219,31 @@ struct GameScreen: View {
     private func menuPoint(in size: CGSize) -> CGPoint {
         CGPoint(x: min(max(22, 22 + CGFloat(menuX) * max(0, size.width - 44) + menuTranslation.width), max(22, size.width - 22)),
                 y: min(max(22, 22 + CGFloat(menuY) * max(0, size.height - 44) + menuTranslation.height), max(22, size.height - 22)))
+    }
+
+    private func joystickPoint(_ joystick: JoystickControl, in size: CGSize) -> CGPoint {
+        let radius = CGFloat(joystick.diameter / 2)
+        return CGPoint(x: min(max(radius, CGFloat(joystick.x) * size.width), max(radius, size.width - radius)),
+                       y: min(max(radius, CGFloat(joystick.y) * size.height), max(radius, size.height - radius)))
+    }
+
+    @ViewBuilder
+    private func joystick(_ stick: JoystickControl, in size: CGSize) -> some View {
+        if editing {
+            EditableControl(button: ControlButton(label: "Joystick", key: stick.mode == "floating" ? "Floating" : "Fixed",
+                                                  x: stick.x, y: stick.y, width: stick.diameter, height: stick.diameter),
+                            center: joystickPoint(stick, in: size), area: size,
+                            onSelect: { editingJoystick = true }, onMove: { point in
+                profile.joystick?.x = Double(point.x / max(1, size.width))
+                profile.joystick?.y = Double(point.y / max(1, size.height))
+            })
+        } else if stick.mode == "floating" {
+            JoystickSurface(configuration: stick).frame(width: size.width, height: size.height)
+        } else {
+            JoystickSurface(configuration: stick)
+                .frame(width: CGFloat(stick.diameter), height: CGFloat(stick.diameter))
+                .position(joystickPoint(stick, in: size))
+        }
     }
 
     private func menuHandle(in size: CGSize) -> some View {
@@ -311,6 +405,9 @@ private struct ControlButtonEditor: View {
 private final class KeyButton: UIButton {
     var mappedKey = ""
     private var pressedKey: String?
+    override var isHighlighted: Bool {
+        didSet { backgroundColor = isHighlighted ? UIColor.systemTeal.withAlphaComponent(0.8) : UIColor.black.withAlphaComponent(0.6) }
+    }
     override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         guard pressedKey == nil else { return false }
         pressedKey = mappedKey
@@ -334,6 +431,9 @@ private struct KeySurface: UIViewRepresentable {
         let button = KeyButton(type: .custom)
         button.backgroundColor = UIColor.black.withAlphaComponent(0.65)
         button.layer.cornerRadius = 10
+        button.layer.borderWidth = 1
+        button.layer.borderColor = UIColor.systemTeal.withAlphaComponent(0.45).cgColor
+        button.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
         button.titleLabel?.adjustsFontSizeToFitWidth = true
         button.titleLabel?.minimumScaleFactor = 0.6
         return button

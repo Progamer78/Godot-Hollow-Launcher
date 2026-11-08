@@ -14,6 +14,7 @@ struct GameSession: Identifiable {
     let id: UUID
     let controller: UIViewController
     let game: Game
+    let aspectRatio: Double
 }
 
 struct PlayerRoot: View {
@@ -31,14 +32,24 @@ struct PlayerRoot: View {
                 NavigationView {
                     List {
                         if library.games.isEmpty {
-                            Text("Import a complete Godot 4 PCK to play offline.")
+                            VStack(spacing: 12) {
+                                Image(systemName: "gamecontroller.fill").font(.largeTitle).foregroundColor(.blue)
+                                Text("Your games, offline").font(.headline)
+                                Text("Import a complete Godot 3 or 4 PCK to get started.").foregroundColor(.secondary)
+                            }.frame(maxWidth: .infinity).padding(.vertical, 28)
                         }
                         ForEach(library.games) { game in
                             NavigationLink(destination: details(game)) {
-                                VStack(alignment: .leading) {
+                                HStack(spacing: 14) {
+                                    Image(systemName: "gamecontroller.fill").font(.title2)
+                                        .foregroundColor(game.pack.major == 3 ? .orange : .blue)
+                                        .frame(width: 44, height: 44)
+                                        .background(Color.secondary.opacity(0.08)).cornerRadius(12)
+                                    VStack(alignment: .leading, spacing: 4) {
                                     Text(game.name)
                                     Text("Godot \(game.pack.version) · \(ByteCountFormatter.string(fromByteCount: Int64(game.pack.byteCount), countStyle: .file))")
                                         .font(.caption).foregroundColor(.secondary)
+                                    }
                                 }
                             }
                         }.onDelete { offsets in
@@ -46,7 +57,7 @@ struct PlayerRoot: View {
                             for game in selected { library.delete(game) }
                         }
                         Section(footer: Text("One game per app process. To return to the library, close the app from the app switcher and reopen it. Only import games you trust; scripts share the app's iOS sandbox.")) {
-                            Text("Runtime: Godot 4.7.2 · ARM64")
+                            Label("Godot 3.6.3 + 4.7.2 · ARM64", systemImage: "cpu")
                         }
                     }
                     .navigationTitle("Godot Player")
@@ -56,7 +67,7 @@ struct PlayerRoot: View {
                             picker = true
                         }.disabled(library.importing || starting)
                     }
-                }.navigationViewStyle(StackNavigationViewStyle())
+                }.navigationViewStyle(StackNavigationViewStyle()).accentColor(.blue)
             }
         }
         .fileImporter(isPresented: $picker, allowedContentTypes: [UTType(filenameExtension: "pck") ?? .data]) { result in
@@ -81,10 +92,17 @@ struct PlayerRoot: View {
                 TextField("Name", text: field(game, \.name))
                 Text("Detected engine: \(game.pack.version)")
                 Text("Pack format: \(game.pack.format) · \(game.pack.fileCount) files")
+                if let versions = game.pack.scriptVersions {
+                    Text("Compiled scripts: \(versions.map { String($0) }.joined(separator: ", "))").font(.caption)
+                }
                 Text("Size: \(ByteCountFormatter.string(fromByteCount: Int64(game.pack.byteCount), countStyle: .file))")
-                Text(RuntimeSelection.problem(for: game) ?? "Candidate for Godot 4.7.2. Execution compatibility is checked by the engine.")
+                Text(RuntimeSelection.problem(for: game) ?? "Candidate for Godot \(game.pack.major == 3 ? "3.6.3" : "4.7.2"). Execution compatibility is checked by the engine.")
                 if let nativeFiles = game.pack.nativeFiles, !nativeFiles.isEmpty {
-                    Text("Bundled native components: \(nativeFiles.joined(separator: ", "))").font(.caption)
+                    Text("Native descriptors in this pack: \(nativeFiles.joined(separator: ", "))").font(.caption)
+                    if game.pack.major == 4 && nativeFiles.contains(where: { $0.lowercased().hasSuffix("/limboai.gdextension") }) {
+                        Text("LimboAI is built into this player. The pack's external library is not loaded.").font(.caption).foregroundColor(.secondary)
+                    }
+                    if !RuntimeSelection.unbundledNativeFiles(for: game).isEmpty {
                     Toggle("Try without native extensions", isOn: Binding(get: {
                         (library.games.first { $0.id == game.id } ?? game).allowNativeFallback == true
                     }, set: { value in
@@ -93,6 +111,7 @@ struct PlayerRoot: View {
                         library.update(updated)
                     }))
                     Text("The original pack stays unchanged. Optional features such as WebRTC multiplayer may be unavailable; required native classes can prevent launch.").font(.caption)
+                    }
                 }
                 Button(starting ? "Starting…" : "Play") { play(game) }
                     .disabled(starting || library.importing || RuntimeSelection.problem(for: game) != nil)
@@ -102,13 +121,30 @@ struct PlayerRoot: View {
                 Picker("Runtime override", selection: field(game, \.runtime)) {
                     Text("Automatic").tag("automatic")
                     Text("Godot 4.7.2").tag("godot4")
-                    Text("Godot 3 (unavailable)").tag("godot3")
+                    Text("Godot 3.6.3").tag("godot3")
                 }
                 Picker("Renderer", selection: field(game, \.renderer)) {
                     Text("Project default").tag("project")
-                    Text("Mobile / Metal").tag("mobile")
-                    Text("Compatibility / OpenGL").tag("gl_compatibility")
+                    if game.pack.major == 3 {
+                        Text("OpenGL ES 2").tag("gles2")
+                        Text("OpenGL ES 3").tag("gles3")
+                    } else {
+                        Text("Mobile / Metal").tag("mobile")
+                        Text("Compatibility / OpenGL").tag("gl_compatibility")
+                    }
                 }
+                Picker("Orientation", selection: Binding(get: {
+                    (library.games.first { $0.id == game.id } ?? game).displayOrientation
+                }, set: { value in
+                    var updated = library.games.first { $0.id == game.id } ?? game
+                    updated.orientation = value
+                    library.update(updated)
+                })) {
+                    Text("Rotate automatically").tag("automatic")
+                    Text("Portrait · Fit").tag("portrait")
+                    Text("Landscape").tag("landscape")
+                }
+                Text("Portrait fits the complete game without cropping. Controls can use the space around the game.").font(.caption)
                 Toggle("Virtual controls", isOn: field(game, \.showControls))
                 Picker("Reset layout directions", selection: field(game, \.directionKeys)) {
                     Text("Arrow keys").tag("arrows")
@@ -116,7 +152,7 @@ struct PlayerRoot: View {
                 }
                 TextField("Extra keys for reset layout", text: field(game, \.extraKeys))
                 Text("While playing, tap the small ⋯ button for mouse settings and Edit Controls. Drag ⋯ if it covers a game button. The menu starts closed, and layouts save separately for each game.").font(.caption)
-                Text("Project scaling and orientation are preserved where iOS permits. Diagnostic log: Files → Godot Player → GodotPlayerSaves → \(game.id.uuidString) → player.log").font(.caption)
+                Text("Diagnostic log: Files → Godot Player → GodotPlayerSaves → \(game.id.uuidString) → player.log").font(.caption)
             }
         }.navigationTitle(game.name)
     }
@@ -138,9 +174,9 @@ struct PlayerRoot: View {
                 defer { starting = false }
                 do {
                     try result.get()
-                    let started: UIViewController? = try PlayerRuntime.startPack(library.packURL(game).path, savePath: library.saveURL(game).path, renderer: game.renderer)
+                    let started: UIViewController? = try PlayerRuntime.startPack(library.packURL(game).path, savePath: library.saveURL(game).path, renderer: game.renderer, engineMajor: Int(game.pack.major), orientation: game.displayOrientation)
                     guard let controller = started else { throw PackError.invalid("The runtime did not create a game view.") }
-                    session = GameSession(id: game.id, controller: controller, game: game)
+                    session = GameSession(id: game.id, controller: controller, game: game, aspectRatio: PlayerRuntime.gameAspectRatio())
                 } catch { library.error = error.localizedDescription }
             }
         }

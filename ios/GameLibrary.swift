@@ -13,6 +13,11 @@ struct Game: Codable, Identifiable {
     // Optional fields preserve manifests written by the first installed player.
     var controlProfile: ControlProfile?
     var allowNativeFallback: Bool?
+    var orientation: String?
+    var displayOrientation: String {
+        let value = orientation ?? "automatic"
+        return ["portrait", "landscape"].contains(value) ? value : "automatic"
+    }
 
     var controls: ControlProfile {
         var profile = controlProfile ?? .legacy(directions: directionKeys, extras: extraKeys)
@@ -22,13 +27,20 @@ struct Game: Codable, Identifiable {
 }
 
 enum RuntimeSelection {
-    static func problem(for game: Game) -> String? {
-        if game.runtime == "godot3" || game.pack.major == 3 {
-            return "Godot 3 is not bundled yet. This pack cannot run in the Godot 4 adapter."
+    static func unbundledNativeFiles(for game: Game) -> [String] {
+        (game.pack.nativeFiles ?? []).filter { path in
+            !(game.pack.major == 4 && path.lowercased().hasSuffix("/limboai.gdextension"))
         }
-        guard game.pack.major == 4 else { return "Only Godot 4 projects can run in this build." }
-        guard game.pack.minor <= 7 else { return "This pack needs a newer Godot runtime than 4.7.2." }
-        if !(game.pack.nativeFiles ?? []).isEmpty, game.allowNativeFallback != true {
+    }
+    static func problem(for game: Game) -> String? {
+        if (game.runtime == "godot3" && game.pack.major != 3) || (game.runtime == "godot4" && game.pack.major != 4) {
+            return "The selected runtime must match the pack's Godot major version."
+        }
+        guard [3, 4].contains(game.pack.major) else { return "This player supports Godot 3 and 4 projects." }
+        if game.pack.major == 4 && game.pack.minor > 7 { return "This pack needs a newer Godot runtime than 4.7.2." }
+        if game.pack.major == 3 && game.pack.minor > 6 { return "This pack needs a newer Godot 3 runtime than 3.6.3." }
+        let unbundled = unbundledNativeFiles(for: game)
+        if !unbundled.isEmpty, game.allowNativeFallback != true {
             return "This pack includes native components. Enable ‘Try without native extensions’ to attempt offline play. Features that depend on those components will not work."
         }
         return nil

@@ -4,7 +4,7 @@ import argparse
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH_REVISION = "floating-menu-spine-v4"
+PATCH_REVISION = "legacy-scripts-limbo-live-tools-v6"
 
 
 def replace(path, old, new):
@@ -18,6 +18,7 @@ def patch(engine):
     apple = engine / "drivers/apple_embedded"
     if "import SwiftUI" not in (apple / "app.swift").read_text(encoding="utf-8"):
         raise RuntimeError("Expected an unmodified official Apple entry point; refusing to patch twice.")
+    shutil.copytree(ROOT / "runtime_shared/player_tools", engine / "modules/player_tools")
     # Keep upstream's actual SwiftUI entry point, app delegate and render view.
     # Swap only its immediate game view for the native pack chooser.
     for source in (ROOT / "ios").iterdir():
@@ -123,6 +124,22 @@ def patch(engine):
     # Keep the ordinary engine Input event path and expose virtual mouse state.
     display_header = apple / "display_server_apple_embedded.h"
     replace(display_header, '#include "core/os/thread_safe.h"', '#include "core/os/thread_safe.h"\n#include "core/input/input.h"')
+
+    # The native host controls rotation and fits the render surface in portrait.
+    # Games may request orientation changes, but cannot override that preference.
+    display_file = apple / "display_server_apple_embedded.mm"
+    replace(display_file,
+        "void DisplayServerAppleEmbedded::screen_set_orientation(DisplayServerEnums::ScreenOrientation p_orientation, int p_screen) {",
+        "extern NSString *player_orientation;\n"
+        "void DisplayServerAppleEmbedded::screen_set_orientation(DisplayServerEnums::ScreenOrientation p_orientation, int p_screen) {\n"
+        '\tif ([player_orientation isEqualToString:@"portrait"]) p_orientation = DisplayServerEnums::SCREEN_PORTRAIT;\n'
+        '\telse if ([player_orientation isEqualToString:@"landscape"]) p_orientation = DisplayServerEnums::SCREEN_SENSOR_LANDSCAPE;\n'
+        '\telse if (player_orientation) p_orientation = DisplayServerEnums::SCREEN_SENSOR;')
+    controller = apple / "godot_view_controller.mm"
+    replace(controller, "- (BOOL)shouldAutorotate {", "- (BOOL)shouldAutorotate {\n\treturn YES;")
+    replace(controller, "- (UIInterfaceOrientationMask)supportedInterfaceOrientations {",
+        "- (UIInterfaceOrientationMask)supportedInterfaceOrientations {\n"
+        "\treturn UIInterfaceOrientationMaskPortrait | UIInterfaceOrientationMaskLandscape;")
     replace(display_header, "\t// MARK: Motion", '#include "player_mouse_display.inc"\n\n\t// MARK: Motion')
     replace(apple / "display_server_apple_embedded.mm",
         "\t\tcase DisplayServerEnums::FEATURE_CLIPBOARD:",

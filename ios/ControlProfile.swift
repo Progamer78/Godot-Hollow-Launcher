@@ -1,5 +1,53 @@
 import Foundation
 
+struct JoystickControl: Codable, Equatable {
+    var mode = "fixed"
+    var x = 0.2
+    var y = 0.76
+    var diameter = 128.0
+    var deadzone = 0.18
+    var up = "Up"
+    var down = "Down"
+    var left = "Left"
+    var right = "Right"
+
+    mutating func constrain() {
+        if !["fixed", "floating"].contains(mode) { mode = "fixed" }
+        x = x.isFinite ? min(1, max(0, x)) : 0.2
+        y = y.isFinite ? min(1, max(0, y)) : 0.76
+        diameter = diameter.isFinite ? min(220, max(90, diameter)) : 128
+        deadzone = deadzone.isFinite ? min(0.5, max(0.08, deadzone)) : 0.18
+        if !ControlKeys.all.contains(up) { up = "Up" }
+        if !ControlKeys.all.contains(down) { down = "Down" }
+        if !ControlKeys.all.contains(left) { left = "Left" }
+        if !ControlKeys.all.contains(right) { right = "Right" }
+    }
+
+    // Values are relative to the stick radius. A radial deadzone prevents
+    // jitter, while angular thresholds allow both cardinal and diagonal input.
+    func keys(dx: Double, dy: Double) -> Set<String> {
+        guard dx.isFinite, dy.isFinite else { return [] }
+        let length = hypot(dx, dy)
+        guard length > deadzone else { return [] }
+        var result = Set<String>()
+        if dx / length < -0.38 { result.insert(left) }
+        if dx / length > 0.38 { result.insert(right) }
+        if dy / length < -0.38 { result.insert(up) }
+        if dy / length > 0.38 { result.insert(down) }
+        return result
+    }
+}
+
+enum GameViewport {
+    static func frame(width: Double, height: Double, aspect: Double) -> (x: Double, y: Double, width: Double, height: Double) {
+        guard width > 0, height > 0, width.isFinite, height.isFinite else { return (0, 0, 0, 0) }
+        guard height > width else { return (0, 0, width, height) }
+        let ratio = aspect.isFinite && aspect > 0 ? aspect : 16.0 / 9.0
+        let w = min(width, height * ratio), h = min(height, width / ratio)
+        return ((width - w) / 2, (height - h) / 2, w, h)
+    }
+}
+
 struct ControlButton: Codable, Identifiable, Equatable {
     var id = UUID()
     var label: String
@@ -23,6 +71,7 @@ struct ControlProfile: Codable, Equatable {
     var mouseEnabled = false
     var mouseMode = "trackpad"
     var mouseSensitivity = 1.0
+    var joystick: JoystickControl?
 
     static func legacy(directions: String, extras: String, areaWidth: Double = 700, areaHeight: Double = 300) -> ControlProfile {
         let keys = directions == "wasd" ? ["W", "A", "S", "D"] : ["Up", "Left", "Down", "Right"]
@@ -60,6 +109,8 @@ struct ControlProfile: Codable, Equatable {
         for index in buttons.indices { buttons[index].constrain() }
         mouseSensitivity = mouseSensitivity.isFinite ? min(3, max(0.25, mouseSensitivity)) : 1
         if !["trackpad", "direct"].contains(mouseMode) { mouseMode = "trackpad" }
+        joystick?.constrain()
+        if joystick?.mode == "floating" { mouseEnabled = false }
     }
 }
 

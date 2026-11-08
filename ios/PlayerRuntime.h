@@ -2,13 +2,16 @@
 #import <UIKit/UIKit.h>
 
 NS_ASSUME_NONNULL_BEGIN
-// This boundary belongs to the Godot 4 adapter. A future Godot 3 adapter must
-// provide an isolated implementation, not link another engine into this image.
+// Select one engine per process. Godot 3 lives in a separate bundled image.
 @interface PlayerRuntime : NSObject
 + (nullable UIViewController *)startPack:(NSString *)packPath
                                savePath:(NSString *)savePath
                                renderer:(NSString *)renderer
+                            engineMajor:(NSInteger)major
+                            orientation:(NSString *)orientation
                                   error:(NSError * _Nullable * _Nullable)error;
++ (double)gameAspectRatio;
++ (NSString *)toolsRequest:(NSString *)json;
 + (void)setKey:(NSString *)key pressed:(BOOL)pressed;
 + (void)releaseKeys;
 + (void)logRuntimeConfiguration;

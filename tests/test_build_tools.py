@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch as mock_patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,12 +18,103 @@ def module(name):
 
 
 class BuildToolsTests(unittest.TestCase):
+    def test_legacy_script_reader_and_builtin_limbo_staging(self):
+        engine = ROOT / ".cache/godot-source"
+        archive = ROOT / ".cache/source.zip"
+        if not engine.is_dir() and not archive.is_file():
+            self.skipTest("Official Godot 4 source unavailable")
+        names = ["modules/gdscript/gdscript_tokenizer_buffer.h", "modules/gdscript/gdscript_tokenizer_buffer.cpp", "core/extension/gdextension_manager.cpp"]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in names:
+                target = root / "engine" / name; target.parent.mkdir(parents=True, exist_ok=True)
+                if engine.is_dir(): shutil.copy2(engine / name, target)
+                else:
+                    with zipfile.ZipFile(archive) as z: target.write_bytes(z.read("godot-4.7.2-stable/" + name))
+            source = root / "limbo"
+            source.mkdir()
+            (source / "SCsub").write_text("# LIMBOAI_MODULE\n")
+            notice = "Copyright LimboAI\nPermission is hereby granted\n"
+            (source / "LICENSE.md").write_text(notice)
+            tool = module("prepare_compatibility")
+            tool.prepare(root / "engine", source, root / "report.json", root / "notice.txt", verify_revision=False)
+            generated = (root / "engine" / names[1]).read_text()
+            self.assertIn("legacy_v100 ? 20 : 16", generated)
+            self.assertIn("version != 100 && version != TOKENIZER_VERSION", generated)
+            self.assertIn("token.type + 1", generated)
+            self.assertIn("ERR_FAIL_COND_V(total_len < 5", generated)
+            self.assertIn("token_count > uint32_t(total_len / 5)", generated)
+            self.assertIn("len > uint32_t(total_len / 4)", generated)
+            self.assertEqual((root / "notice.txt").read_text(), notice)
+            self.assertIn("MODULE_LIMBOAI_ENABLED", (root / "engine" / names[2]).read_text())
+            self.assertIn("imported library is not loaded", (root / "engine" / names[2]).read_text())
+            with self.assertRaises(RuntimeError):
+                tool.prepare(root / "engine", source, root / "report.json", root / "notice.txt", verify_revision=False)
+
+    def test_godot3_patch_against_official_source(self):
+        engine = ROOT / ".cache/godot3-source"
+        archive = ROOT / ".cache/godot3-source.zip"
+        if not (engine / "platform/iphone/SCsub").is_file() and not archive.is_file():
+            self.skipTest("Official Godot 3 sources unavailable")
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            if (engine / "platform/iphone/SCsub").is_file():
+                for folder in ["platform/iphone", "drivers", "modules"]:
+                    shutil.copytree(engine / folder, target / folder)
+            else:
+                with zipfile.ZipFile(archive) as z:
+                    for name in z.namelist():
+                        relative = name.removeprefix("godot-3.6.3-stable/")
+                        if relative.startswith(("platform/iphone/", "drivers/", "modules/")) and not name.endswith("/"):
+                            destination = target / relative
+                            destination.parent.mkdir(parents=True, exist_ok=True)
+                            destination.write_bytes(z.read(name))
+            tool = module("patch_godot3")
+            metadata = tool.patch(target)
+            self.assertIn("GP3GodotView", metadata["objc_names"])
+            self.assertIn("GP3GodotViewDelegate", metadata["objc_names"])
+            self.assertTrue((target / "modules/player_tools/player_tools.cpp").is_file())
+            ios = target / "platform/iphone"
+            self.assertNotIn('"main.m"', (ios / "SCsub").read_text())
+            self.assertIn('"player3_runtime.mm"', (ios / "SCsub").read_text())
+            self.assertNotIn("exit(0)", (ios / "app_delegate.mm").read_text())
+            self.assertIn("gp3_save_path", (ios / "app_delegate.mm").read_text())
+            self.assertIn("gp3_main_started = Main::start()", (ios / "os_iphone.mm").read_text())
+            self.assertIn("ERR_FAIL_V_MSG(ERR_UNAVAILABLE", (ios / "os_iphone.mm").read_text())
+            self.assertNotIn("argc = add_cmdline(argc, fargv);", (ios / "godot_iphone.mm").read_text())
+            self.assertIn("gp3_render_ready()", (ios / "godot_view_renderer.mm").read_text())
+            self.assertIn("gp3_main_started", (ios / "godot_view_renderer.mm").read_text())
+            self.assertNotIn("@interface GodotView :", (ios / "godot_view.h").read_text())
+            with self.assertRaises(RuntimeError):
+                tool.patch(target)
+
+    def test_embedded_framework_collision_audit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            payload = root / "Payload"
+            app = payload / "player.app"
+            app.mkdir(parents=True)
+            (app / "Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "player"}))
+            framework = root / "Godot3Runtime.framework"
+            framework.mkdir()
+            (framework / "Godot3Runtime").write_bytes(b"test-image")
+            installer = module("install_godot3_framework")
+            host = "000 T _OBJC_CLASS_$_GDTViewController\n U _OBJC_CLASS_$_UIView\n"
+            guest = "000 T _OBJC_CLASS_$_GP3ViewController\n U _OBJC_CLASS_$_UIView\n"
+            with mock_patch.object(installer.subprocess, "check_output", side_effect=[host, guest]):
+                installer.install(payload, framework)
+            self.assertEqual((app / "Frameworks/Godot3Runtime.framework/Godot3Runtime").read_bytes(), b"test-image")
+            with mock_patch.object(installer.subprocess, "check_output", side_effect=[host, host]):
+                with self.assertRaises(RuntimeError):
+                    installer.install(payload, framework)
+
     def test_patch_matches_official_release(self):
         names = [
             "drivers/apple_embedded/app.swift", "drivers/apple_embedded/app_delegate_service.mm",
             "drivers/apple_embedded/os_apple_embedded.mm", "drivers/apple_embedded/bridging_header_apple_embedded.h",
             "core/extension/gdextension.cpp", "platform_methods.py",
             "drivers/apple_embedded/godot_view_renderer.mm",
+            "drivers/apple_embedded/godot_view_controller.mm",
             "drivers/apple_embedded/godot_view_apple_embedded.mm",
             "drivers/apple_embedded/display_server_apple_embedded.h",
             "drivers/apple_embedded/display_server_apple_embedded.mm",
@@ -57,6 +149,7 @@ class BuildToolsTests(unittest.TestCase):
             self.assertIn('#include "core/input/input.h"', display)
             self.assertTrue((target / "drivers/apple_embedded/GameControls.swift").is_file())
             self.assertTrue((target / "drivers/apple_embedded/ControlProfile.swift").is_file())
+            self.assertTrue((target / "modules/player_tools/player_tools.cpp").is_file())
             self.assertTrue((target / "drivers/apple_embedded/player_mouse_display.inc").is_file())
             features = (target / "drivers/apple_embedded/display_server_apple_embedded.mm").read_text()
             for feature in ["FEATURE_MOUSE", "FEATURE_MOUSE_WARP", "FEATURE_CURSOR_SHAPE", "FEATURE_CUSTOM_CURSOR_SHAPE"]:
@@ -82,6 +175,8 @@ class BuildToolsTests(unittest.TestCase):
             self.assertEqual(runtime.read_bytes(), library.read_bytes())
             data = plistlib.loads(info.read_bytes())
             self.assertTrue(data["UIFileSharingEnabled"])
+            self.assertEqual(data["MinimumOSVersion"], "15.0")
+            self.assertIn("UIInterfaceOrientationPortrait", data["UISupportedInterfaceOrientations"])
             self.assertNotIn("NSCameraUsageDescription", data)
             self.assertNotIn("godot_cmdline", data)
             self.assertEqual((export / "player.pck").stat().st_size, 0)
@@ -91,6 +186,10 @@ class BuildToolsTests(unittest.TestCase):
             module("prepare_xcode").prepare(export, library, notice)
             self.assertIn('"SpineRuntimeNotices"', (app / "en.lproj/InfoPlist.strings").read_text())
             self.assertIn("Preserved notice", (app / "en.lproj/InfoPlist.strings").read_text())
+            compatibility_notice = export / "limbo-license.txt"
+            compatibility_notice.write_text("LimboAI MIT notice", encoding="utf-8")
+            module("prepare_xcode").prepare(export, library, notice, compatibility_notice)
+            self.assertIn("LimboAI MIT notice", (app / "en.lproj/InfoPlist.strings").read_text())
             notice.write_text("", encoding="utf-8")
             with self.assertRaises(RuntimeError):
                 module("prepare_xcode").prepare(export, library, notice)
@@ -141,6 +240,9 @@ class BuildToolsTests(unittest.TestCase):
             self.assertIn("LocalVector<StringName> animation_libraries", (installed / "SpineAnimationTrack.cpp").read_text())
             self.assertNotIn("memdelete(json)", (installed / "SpineAtlasResource.cpp").read_text())
             self.assertEqual((installed / "register_types.cpp").read_text().count(".unref();"), 4)
+            tool.prepare(root / "engine3", source, "4.2", root / "report3.json", root / "notice3.txt", verify_revision=False, engine_major=3)
+            self.assertIn("RS::ARRAY_MAX", (root / "engine3/modules/spine_godot/SpineSprite.h").read_text())
+            self.assertEqual((root / "engine3/modules/spine_godot/SpineAtlasResource.cpp").read_text(), (module_dir / "SpineAtlasResource.cpp").read_text())
             with self.assertRaises(RuntimeError):
                 tool.prepare(engine, source, "4.2", report, notice, verify_revision=False)
             with self.assertRaises(RuntimeError):

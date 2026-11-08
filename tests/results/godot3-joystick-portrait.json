@@ -1,0 +1,79 @@
+{
+  "date": "2026-11-08",
+  "baseline": "User reports preceding Godot 4/Spine/floating-menu player working on iPhone.",
+  "implemented": [
+    "Bundled, isolated Godot 3.6.3 iOS framework and versioned bridge",
+    "Godot 3 startup from selected external main PCK and UUID save path",
+    "Fixed and floating keyboard joysticks with persisted mappings/geometry/deadzone",
+    "Portrait aspect-fit host, per-game orientation and native rotation requests",
+    "Library colors/icons and virtual-button press feedback"
+  ],
+  "engine3_revision": "a3378686f7196db78d7b3cc7947f72a13bc4864c",
+  "sadiubus_original_pck": {
+    "engine": "3.6.3-stable",
+    "engine_download_sha256": "80616a2621025b508a5ed14a5066630fb6c0c384ecab87277bf33569e965eec3",
+    "pack_version": "3.4.2",
+    "pack_format": 1,
+    "file_count": 1927,
+    "bytes": 69863344,
+    "exit_code": 0,
+    "script_errors": 0,
+    "method": "Original unmodified PCK with official desktop engine --main-pack --no-window --quit (startup only)."
+  },
+  "original_godot3_sample": {
+    "runtime": "Godot 3.6.3 official desktop",
+    "frames_each_launch": 90,
+    "loaded_counts": [
+      0,
+      1
+    ],
+    "pack_bytes": 2944,
+    "keyboard_input": "passed",
+    "animation": "passed",
+    "save_reload": "passed",
+    "ios_execution": "not tested"
+  },
+  "template_symbol_inspection": {
+    "3.6.3": {
+      "library_bytes": 72048096,
+      "defined_external_symbols": 82279
+    },
+    "4.7.2": {
+      "library_bytes": 188887256,
+      "defined_external_symbols": 168718
+    },
+    "shared_symbol_count": 18264,
+    "shared_objc_classes": [],
+    "shared_cpp_examples": [
+      "__ZN10AESContext12get_iv_stateEv",
+      "__ZN10AESContext13_bind_methodsEv",
+      "__ZN10AESContext18_initialize_classvEv",
+      "__ZN10AESContext5_setvERK10StringNameRK7Variant",
+      "__ZN10AESContext6finishEv",
+      "__ZN10AESContextD0Ev",
+      "__ZN10AESContextD1Ev",
+      "__ZN10BaseButton11set_pressedEb"
+    ]
+  },
+  "python_tests": {
+    "passed": 6,
+    "engine_patch_anchors": "Verified against original official source archives/checkouts.",
+    "native_collision_check": "Fixture verified; actual Mach-O audit will run during CI linking/packaging."
+  },
+  "swift_model_tests": "Added; not run locally (Swift toolchain unavailable).",
+  "new_ios_code_compiled": false,
+  "new_ios_ipa_produced": false,
+  "new_ios_execution_verified": false,
+  "remaining": [
+    "Actions ARM64 compile/link and Swift type-check/model tests",
+    "Framework and app signing with personal sideloading tool",
+    "Both engines launching imported PCKs in the same installed IPA",
+    "Joystick touch ownership, rotation/fit/click coordinates, lifecycle/audio/save behavior on iPhone"
+  ],
+  "limitations": [
+    "One engine launch per process; close/reopen between games",
+    "Joysticks emit keyboard directions, not analog gamepad axes",
+    "Godot 3 custom cursor images not bridged; default arrow provided",
+    "No Mono or imported native game libraries; renderer/assets/custom modules may be incompatible"
+  ]
+}
