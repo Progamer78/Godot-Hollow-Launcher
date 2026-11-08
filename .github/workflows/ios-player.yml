@@ -2,6 +2,12 @@ name: Build native Godot Player
 
 on:
   workflow_dispatch:
+    inputs:
+      spine_runtime:
+        description: 'Bundled Spine version (must match game assets; separate Spine Runtimes license applies)'
+        type: choice
+        default: '4.2'
+        options: ['4.2', '4.1', '4.3', 'none']
   push:
     branches: [main, master]
 
@@ -12,6 +18,8 @@ jobs:
   export-and-build:
     runs-on: macos-latest
     timeout-minutes: 120
+    env:
+      SPINE_RUNTIME: ${{ inputs.spine_runtime || '4.2' }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup matching official Godot and export templates
@@ -36,12 +44,40 @@ jobs:
           ref: ed1daf0bf001b61586d9930840f2f1394092c079 # 4.7.2-stable
           path: .cache/godot-source
           persist-credentials: false
+      - name: Select pinned Spine runtime source
+        id: spine
+        run: |
+          python3 - <<'PY'
+          import os
+          from tools.prepare_spine import REVISIONS
+          version = os.environ['SPINE_RUNTIME']
+          if version not in REVISIONS:
+              raise SystemExit('Unsupported Spine runtime selection')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('revision=' + REVISIONS[version] + '\n')
+          print('Selected bundled Spine runtime:', version)
+          PY
+      - name: Checkout official Spine module and C++ runtime
+        if: env.SPINE_RUNTIME != 'none'
+        uses: actions/checkout@v4
+        with:
+          repository: EsotericSoftware/spine-runtimes
+          ref: ${{ steps.spine.outputs.revision }}
+          path: .cache/spine-runtimes
+          persist-credentials: false
+          sparse-checkout: |
+            spine-godot/spine_godot
+            spine-cpp/spine-cpp
+      - name: Stage bundled animation runtime
+        run: python3 tools/prepare_spine.py .cache/godot-source .cache/spine-runtimes --version "$SPINE_RUNTIME"
       - name: Export and execute two independent PCKs
         run: python3 tools/desktop_proof.py "$(command -v godot)"
       - name: Test native pack inspector
         run: |
           swiftc -swift-version 5 ios/PCKInspector.swift tests/pck/main.swift -o build/pck-tests
           build/pck-tests build/proof/movement.pck build/proof/counter.pck
+          swiftc -swift-version 5 ios/PCKInspector.swift ios/ControlProfile.swift ios/GameLibrary.swift tests/models/main.swift -o build/model-tests
+          build/model-tests
           python3 -m unittest discover -s tests -v
       - name: Patch and verify player integration
         run: |
@@ -70,12 +106,23 @@ jobs:
           python3 -m venv .cache/scons-env
           .cache/scons-env/bin/pip install scons==4.10.1
           cd .cache/godot-source
-          ../scons-env/bin/scons platform=ios target=template_release arch=arm64 \
-            disable_path_overrides=no vulkan=no metal=yes opengl3=yes \
-            debug_symbols=no optimize=size -j"$(sysctl -n hw.logicalcpu)" \
-            2>&1 | tee ../../build/runtime-build.log
+          runtime_flags=(platform=ios target=template_release arch=arm64
+            disable_path_overrides=no vulkan=no metal=yes opengl3=yes
+            debug_symbols=no optimize=size -j"$(sysctl -n hw.logicalcpu)")
+          if [ "$SPINE_RUNTIME" != 'none' ]; then
+            # Compile the new dependency first, reusing its objects below.
+            ../scons-env/bin/scons "${runtime_flags[@]}" \
+              bin/obj/modules/libmodule_spine_godot.ios.template_release.arm64.a \
+              2>&1 | tee ../../build/spine-compile.log
+          fi
+          ../scons-env/bin/scons "${runtime_flags[@]}" 2>&1 | tee ../../build/runtime-build.log
       - name: Install player runtime into exported Xcode project
-        run: python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a
+        run: |
+          spine_notice=()
+          if [ "$SPINE_RUNTIME" != 'none' ]; then
+            spine_notice=(--spine-license build/SPINE-RUNTIMES-LICENSE.txt)
+          fi
+          python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a "${spine_notice[@]}"
       - name: Build Xcode archive (unsigned)
         run: |
           set -o pipefail
@@ -100,6 +147,8 @@ jobs:
           path: |
             build/GodotPlayer-unsigned.ipa
             build/*.log
+            build/spine-build.json
+            build/SPINE-RUNTIMES-LICENSE.txt
             build/proof/*.pck
             build/proof/*.log
             build/proof/results.json
