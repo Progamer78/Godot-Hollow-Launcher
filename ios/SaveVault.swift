@@ -14,20 +14,23 @@ enum SafeFiles {
         guard try root.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else { throw PackError.invalid("Symbolic links are not allowed in save folders.") }
         var result: [(URL, String, Int64)] = []; var total: Int64 = 0; var enumerationError: Error?
         var visited = 0
-        guard let iterator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey], options: [], errorHandler: { _, error in enumerationError = error; return false }) else { throw PackError.invalid("Cannot read the save folder; no backup was created.") }
+        // Foundation may expand an ancestor alias such as /var -> /private/var
+        // in enumerated URLs. Use the same canonical root for enumeration,
+        // containment and relative names so exclusions and restored paths agree.
+        guard let iterator = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey], options: [], errorHandler: { _, error in enumerationError = error; return false }) else { throw PackError.invalid("Cannot read the save folder; no backup was created.") }
         for case let url as URL in iterator {
             visited += 1
             guard visited <= 100000 else { throw PackError.invalid("Save folder has too many files or directories to back up.") }
             let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
-            guard values.isSymbolicLink != true, url.standardizedFileURL.resolvingSymlinksInPath().path.hasPrefix(base.path + "/") else { throw PackError.invalid("Unsafe save file or symbolic link.") }
-            let relative = String(url.path.dropFirst(root.path.count + 1))
+            let canonicalPath = url.standardizedFileURL.resolvingSymlinksInPath().path
+            guard values.isSymbolicLink != true, canonicalPath.hasPrefix(base.path + "/") else { throw PackError.invalid("Unsafe save file or symbolic link.") }
+            let relative = String(canonicalPath.dropFirst(base.path.count + 1))
             if let first = relative.split(separator: "/").first, excluding.contains(String(first)) { if values.isDirectory == true { iterator.skipDescendants() }; continue }
             if values.isDirectory == true { try directory?(relative) }
             if values.isRegularFile == true {
-                let name = String(url.path.dropFirst(root.path.count + 1))
                 let size = Int64(values.fileSize ?? 0)
                 guard result.count < 100000, size <= 4 << 30, total <= (8 << 30) - size else { throw PackError.invalid("Save folder exceeds the 8 GB backup limit.") }
-                total += size; result.append((url, name, size))
+                total += size; result.append((url, relative, size))
             }
         }
         if let error = enumerationError { throw error }
