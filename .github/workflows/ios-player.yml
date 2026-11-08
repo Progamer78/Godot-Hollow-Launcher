@@ -92,10 +92,15 @@ jobs:
         run: python3 tools/desktop_proof.py "$(command -v godot)"
       - name: Test native pack inspector
         run: |
+          set -o pipefail
           swiftc -swift-version 5 ios/PCKInspector.swift tests/pck/main.swift -o build/pck-tests
           build/pck-tests build/proof/movement.pck build/proof/counter.pck build/godot3-proof/godot3.pck
-          swiftc -swift-version 5 ios/PCKInspector.swift ios/ControlProfile.swift ios/ToolModels.swift ios/GameLibrary.swift tests/models/main.swift -o build/model-tests
+          python3 tools/build_archive_support.py .cache/godot-source build/archive-tests
+          python3 tools/package_fixtures.py
+          swiftc -swift-version 5 -import-objc-header ios/ArchiveSupport.h ios/PCKInspector.swift ios/ControlProfile.swift ios/ToolModels.swift ios/PackageImport.swift ios/SaveVault.swift ios/GameLibrary.swift tests/models/main.swift -L build/archive-tests -lplayer_archive -Xlinker -lc++ -lz -o build/model-tests
           build/model-tests
+          godot --headless --main-pack build/archive-tests/imported-apk.pck -- --player-proof 2>&1 | tee build/apk-proof.log
+          python3 -c "from pathlib import Path; text=Path('build/apk-proof.log').read_text(); assert 'PLAYER_PROOF movement PASS' in text and not any(message in text for message in ['SCRIPT ERROR', 'Failed to load', 'Error opening', 'Couldn\x27t load project']), text"
           python3 -m unittest discover -s tests -v
       - name: Stage legacy script compatibility and built-in AI runtime
         run: python3 tools/prepare_compatibility.py .cache/godot-source .cache/limboai
@@ -182,12 +187,16 @@ jobs:
           python3 tools/install_godot3_framework.py build/package/Payload build/runtime3/Godot3Runtime.framework
           cd build/package
           zip -qr ../GodotPlayer-unsigned.ipa Payload
+          cd ../..
+          python3 tools/audit_ipa.py build/GodotPlayer-unsigned.ipa
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: GodotPlayer-build-and-tests
+          retention-days: 90
           path: |
             build/GodotPlayer-unsigned.ipa
+            build/ipa-audit.json
             build/*.log
             build/spine-build.json
             build/spine3-build.json
