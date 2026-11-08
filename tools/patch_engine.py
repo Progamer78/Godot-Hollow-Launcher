@@ -4,6 +4,7 @@ import argparse
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
+PATCH_REVISION = "controller-header-v2"
 
 
 def replace(path, old, new):
@@ -68,7 +69,8 @@ def patch(engine):
         replace(view, signature, signature + "\n\tif (!DisplayServerAppleEmbedded::get_singleton()) return;")
 
     renderer = apple / "godot_view_renderer.mm"
-    replace(renderer, '#import "godot_view_renderer.h"', '#import "godot_view_renderer.h"\n#import "app_delegate_service.h"')
+    replace(renderer, '#import "godot_view_renderer.h"',
+        '#import "godot_view_renderer.h"\n#import "app_delegate_service.h"\n#import "godot_view_controller.h"')
     replace(renderer, "@property(assign, nonatomic) BOOL hasFinishedSetup;",
         "@property(assign, nonatomic) BOOL hasFinishedSetup;\n@property(assign, nonatomic) BOOL playerSetupFailed;")
     replace(renderer, "\tif (self.hasFinishedSetup) {", "\tif (self.playerSetupFailed) return YES;\n\tif (self.hasFinishedSetup) {")
@@ -109,8 +111,16 @@ def patch(engine):
         "Error GDExtension::open_library(const String &p_path, const Ref<GDExtensionLoader> &p_loader) {\n"
         '\tERR_FAIL_V_MSG(ERR_UNAVAILABLE, "Native game extensions are disabled in Godot Player.");')
 
+    # Check the generated translation unit, not just this patcher's contents.
+    # A root-level patch_engine.py uploaded through the web is a different file
+    # from tools/patch_engine.py, which is the file invoked by the workflow.
+    if '#import "godot_view_controller.h"' not in renderer.read_text(encoding="utf-8"):
+        raise RuntimeError("The renderer is missing the complete GDTViewController declaration.")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("engine", type=Path)
+    print(f"Player patcher: {Path(__file__).resolve()} ({PATCH_REVISION})", flush=True)
     patch(parser.parse_args().engine.resolve())
+    print("Verified generated renderer imports the complete GDTViewController interface.", flush=True)
