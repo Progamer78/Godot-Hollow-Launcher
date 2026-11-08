@@ -43,13 +43,8 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
         return true
     }
     private func exercise(_ root: UIView) {
-        var count: UInt32 = 0
-        let methods = class_copyMethodList(KeyButton.self, &count)
-        defer { free(methods) }
-        for index in 0..<Int(count) {
-            let name = NSStringFromSelector(method_getName(methods![index]))
-            check(!["release", "retain", "autorelease", "retainCount", "dealloc"].contains(name), "Control overrides object-lifetime selector \(name)")
-        }
+        let unsafe = unsafeLifetimeSelectors(KeyButton.self)
+        check(unsafe.isEmpty, "Control overrides object-lifetime selectors \(unsafe)")
         for index in 0..<100 {
             autoreleasepool {
                 let button = KeyButton(type: .custom)

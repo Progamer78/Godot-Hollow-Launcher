@@ -24,6 +24,19 @@ def audit_callbacks():
             raise RuntimeError(f"Object-lifetime selector exposed by {path.name}: {unsafe}")
 
 
+def cleanup_device(device):
+    # Cleanup is best-effort on the disposable CI simulator. Preserve the
+    # original test result if CoreSimulator is slow, and still attempt delete
+    # even when shutdown timed out.
+    for action in ["shutdown", "delete"]:
+        try:
+            result = subprocess.run(["xcrun", "simctl", action, device], capture_output=True, timeout=30)
+            if result.returncode:
+                print(f"Simulator cleanup {action} returned {result.returncode}; continuing.")
+        except (subprocess.TimeoutExpired, OSError) as error:
+            print(f"Simulator cleanup {action} could not finish: {error}")
+
+
 def run(output):
     audit_callbacks()
     output.mkdir(parents=True, exist_ok=True)
@@ -39,7 +52,7 @@ def run(output):
         "CFBundleSupportedPlatforms": ["iPhoneSimulator"],
         "UILaunchScreen": {}, "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
     }))
-    files = ["ios/ControlProfile.swift", "ios/GameInput.swift", "ios/InputViews.swift", "ios/KeyboardInput.swift", "ios/Joystick.swift", "tests/input-ui/main.swift"]
+    files = ["ios/ControlProfile.swift", "ios/GameInput.swift", "ios/InputViews.swift", "ios/KeyboardInput.swift", "ios/Joystick.swift", "tests/input-ui/LifetimeAudit.swift", "tests/input-ui/main.swift"]
     subprocess.run(["xcrun", "--sdk", "iphonesimulator", "swiftc", "-swift-version", "5", "-parse-as-library",
                     "-sdk", sdk, "-target", f"{arch}-apple-ios15.0-simulator",
                     *[str(ROOT / file) for file in files], "-o", str(app / "InputSmoke")], check=True, timeout=120)
@@ -67,8 +80,7 @@ def run(output):
         (output / "results.json").write_text(json.dumps({"passed": True, "runtime": runtime, "sources": files,
               "scope": "Actual UIKit controls/keyboard; recorded engine endpoints, no Godot runtime"}, indent=2) + "\n")
     finally:
-        subprocess.run(["xcrun", "simctl", "shutdown", device], capture_output=True, timeout=30)
-        subprocess.run(["xcrun", "simctl", "delete", device], capture_output=True, timeout=30)
+        cleanup_device(device)
 
 
 if __name__ == "__main__":
