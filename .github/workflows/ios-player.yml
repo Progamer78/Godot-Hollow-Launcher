@@ -130,6 +130,10 @@ jobs:
           set -o pipefail
           python3 tools/check_ios_archive_link.py .cache/godot-source build/ios-archive-link \
             2>&1 | tee build/ios-archive-link.log
+      - name: Exercise input views and keyboard in an iPhone simulator
+        run: |
+          set -o pipefail
+          python3 tools/check_input_ui.py build/input-ui 2>&1 | tee build/input-ui.log
       - name: Compile isolated Godot 3 framework
         run: |
           set -o pipefail
@@ -203,6 +207,8 @@ jobs:
             build/GodotPlayer-unsigned.ipa
             build/ipa-audit.json
             build/ios-archive-link/results.json
+            build/input-ui/results.json
+            build/input-ui/run.log
             build/*.log
             build/spine-build.json
             build/spine3-build.json
