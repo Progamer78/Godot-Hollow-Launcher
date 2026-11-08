@@ -85,6 +85,22 @@ let priorProfile = try JSONSerialization.data(withJSONObject: ["buttons": [], "m
 let migratedProfile = try JSONDecoder().decode(ControlProfile.self, from: priorProfile)
 require(migratedProfile.joystick == nil && migratedProfile.mouseEnabled, "Installed mouse/control profiles decode without a joystick field")
 let stick = JoystickControl()
+for selectedAxis in [nil, 0, 2] as [Int?] {
+    var original = JoystickControl()
+    original.axis = selectedAxis
+    var constrained = original
+    constrained.constrain()
+    require(constrained == original, "Valid and legacy joystick axes must survive normalization unchanged")
+    let persisted = try JSONDecoder().decode(JoystickControl.self, from: JSONEncoder().encode(constrained))
+    require(persisted == original, "Unset and explicit joystick axes must survive persistence")
+}
+var invalidAxis = JoystickControl()
+invalidAxis.axis = 99
+invalidAxis.constrain()
+require(invalidAxis.axis == 0, "Unsupported joystick axes must fall back to the left stick")
+let correctedAxis = invalidAxis
+invalidAxis.constrain()
+require(invalidAxis == correctedAxis, "Joystick normalization must be idempotent")
 require(stick.keys(dx: 0.05, dy: 0.05).isEmpty, "Stick deadzone releases all directions")
 require(stick.keys(dx: -1, dy: 0) == ["Left"], "Stick cardinal direction")
 require(stick.keys(dx: 1, dy: -1) == ["Right", "Up"], "Stick diagonals hold two directions")

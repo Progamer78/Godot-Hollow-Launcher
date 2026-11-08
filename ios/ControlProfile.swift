@@ -24,7 +24,9 @@ struct JoystickControl: Codable, Equatable {
     mutating func constrain() {
         if !["fixed", "floating"].contains(mode) { mode = "fixed" }
         if output != "gamepad" { output = nil }
-        if axis != 2 { axis = 0 }
+        // nil is the persisted legacy/default left stick. Keep it unset so
+        // saving an otherwise valid layout does not change its identity.
+        if let selectedAxis = axis, ![0, 2].contains(selectedAxis) { axis = 0 }
         x = x.isFinite ? min(1, max(0, x)) : 0.2
         y = y.isFinite ? min(1, max(0, y)) : 0.76
         diameter = diameter.isFinite ? min(220, max(90, diameter)) : 128
