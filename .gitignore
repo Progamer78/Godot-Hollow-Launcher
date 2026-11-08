@@ -1,0 +1,10 @@
+.cache/
+build/
+artifacts/
+**/.godot/
+**/__pycache__/
+GodotPlayerReference/
+*.ipa
+*.xcarchive/
+*.xcuserstate
+
