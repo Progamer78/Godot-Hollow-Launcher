@@ -95,6 +95,8 @@ jobs:
           set -o pipefail
           swiftc -swift-version 5 ios/PCKInspector.swift tests/pck/main.swift -o build/pck-tests
           build/pck-tests build/proof/movement.pck build/proof/counter.pck build/godot3-proof/godot3.pck
+          swiftc -swift-version 5 tests/input-ui/LifetimeAudit.swift tests/objc-lifetime/main.swift -o build/objc-lifetime-tests
+          build/objc-lifetime-tests
           python3 tools/build_archive_support.py .cache/godot-source build/archive-tests
           python3 tools/package_fixtures.py
           swiftc -swift-version 5 -import-objc-header ios/ArchiveSupport.h ios/PCKInspector.swift ios/ControlProfile.swift ios/ToolModels.swift ios/PackageImport.swift ios/SaveVault.swift ios/GameLibrary.swift tests/models/main.swift -L build/archive-tests -lplayer_archive -Xlinker -lc++ -lz -o build/model-tests
