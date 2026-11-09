@@ -52,7 +52,7 @@ def run(output):
         "CFBundleSupportedPlatforms": ["iPhoneSimulator"],
         "UILaunchScreen": {}, "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
     }))
-    files = ["ios/ControlProfile.swift", "ios/GameInput.swift", "ios/InputViews.swift", "ios/KeyboardInput.swift", "ios/Joystick.swift", "tests/input-ui/LifetimeAudit.swift", "tests/input-ui/main.swift"]
+    files = ["ios/ControllerProfile.swift", "ios/ControllerInput.swift", "ios/ControlProfile.swift", "ios/GameInput.swift", "ios/InputViews.swift", "ios/KeyboardInput.swift", "ios/Joystick.swift", "tests/input-ui/LifetimeAudit.swift", "tests/input-ui/main.swift"]
     subprocess.run(["xcrun", "--sdk", "iphonesimulator", "swiftc", "-swift-version", "5", "-parse-as-library",
                     "-sdk", sdk, "-target", f"{arch}-apple-ios15.0-simulator",
                     *[str(ROOT / file) for file in files], "-o", str(app / "InputSmoke")], check=True, timeout=120)

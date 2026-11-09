@@ -93,16 +93,21 @@ struct KeySurface: UIViewRepresentable {
 struct MouseSurface: UIViewRepresentable {
     let mode: String
     let sensitivity: Double
+    var gestures=TouchGestures()
     func makeUIView(context: Context) -> MouseTouchView { MouseTouchView() }
     func updateUIView(_ view: MouseTouchView, context: Context) {
         if view.mode != mode { view.cancelTouch() }
         view.mode = mode
         view.sensitivity = CGFloat(sensitivity)
+        view.configureGestures(gestures)
     }
     static func dismantleUIView(_ view: MouseTouchView, coordinator: ()) { view.stop() }
 }
 
 final class MouseTouchView: UIView {
+    private var gestureProfile=TouchGestures()
+    private var gestureRecognizersOwned: [UIGestureRecognizer]=[]
+    private var scrollRemainder: CGFloat=0
     var mode = "trackpad"
     var sensitivity: CGFloat = 1
     private var last = CGPoint.zero
@@ -117,7 +122,7 @@ final class MouseTouchView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        isMultipleTouchEnabled = false
+        isMultipleTouchEnabled = true
         backgroundColor = .clear
         cursor.isUserInteractionEnabled = false
         addSubview(cursor)
@@ -130,10 +135,34 @@ final class MouseTouchView: UIView {
         arrow.strokeColor = UIColor.black.cgColor
         arrow.lineWidth = 1.5
         cursor.layer.addSublayer(arrow)
+        let two=UITapGestureRecognizer(target:self,action:#selector(twoFingerTap)); two.numberOfTouchesRequired=2
+        let three=UITapGestureRecognizer(target:self,action:#selector(threeFingerTap)); three.numberOfTouchesRequired=3
+        two.require(toFail:three)
+        let pan=UIPanGestureRecognizer(target:self,action:#selector(scrollGesture(_:))); pan.minimumNumberOfTouches=2; pan.maximumNumberOfTouches=2
+        gestureRecognizersOwned=[two,three,pan]
+        for recognizer in gestureRecognizersOwned { recognizer.isEnabled=false; addGestureRecognizer(recognizer) }
         NotificationCenter.default.addObserver(self, selector: #selector(cancelTouch), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(cancelTouch), name: Notification.Name("GodotPlayerReleaseInputs"), object: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    func configureGestures(_ value: TouchGestures) {
+        gestureProfile=value
+        for recognizer in gestureRecognizersOwned { recognizer.isEnabled=value.enabled && mode == "trackpad" }
+        gestureRecognizersOwned.last?.isEnabled=value.enabled && value.scroll && mode == "trackpad"
+    }
+    private func gestureKey(_ key: String) { cancelTouch(); if !key.isEmpty && key != "None" { GameInput.key(key,pressed:true); GameInput.key(key,pressed:false) } }
+    @objc private func twoFingerTap() { gestureKey(gestureProfile.twoFingerTap) }
+    @objc private func threeFingerTap() { gestureKey(gestureProfile.threeFingerTap) }
+    @objc private func scrollGesture(_ gesture: UIPanGestureRecognizer) {
+        cancelTouch()
+        if gesture.state == .began { scrollRemainder=0 }
+        let delta=gesture.translation(in:self).y; gesture.setTranslation(.zero,in:self)
+        scrollRemainder += delta
+        while abs(scrollRemainder)>=24 {
+            PlayerRuntime.scrollMouse(scrollRemainder>0 ? 1 : -1)
+            scrollRemainder += scrollRemainder>0 ? -24 : 24
+        }
+    }
     deinit { displayLink?.invalidate(); NotificationCenter.default.removeObserver(self) }
     override func didMoveToWindow() {
         super.didMoveToWindow()
@@ -171,6 +200,7 @@ final class MouseTouchView: UIView {
         cursor.isHidden = !PlayerRuntime.mouseCursorVisible()
     }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard activeTouches(event, fallback:touches) == 1 else { cancelTouch(); return }
         guard let touch = touches.first else { return }
         last = touch.location(in: self)
         distance = 0
@@ -182,6 +212,7 @@ final class MouseTouchView: UIView {
         }
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard activeTouches(event, fallback:touches) == 1 else { cancelTouch(); return }
         guard tracking, let touch = touches.first else { return }
         let point = touch.location(in: self)
         let delta = CGPoint(x: point.x - last.x, y: point.y - last.y)
@@ -199,4 +230,9 @@ final class MouseTouchView: UIView {
         cancelTouch()
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { cancelTouch() }
+    private func activeTouches(_ event: UIEvent?, fallback: Set<UITouch>) -> Int {
+        // A finger holding a virtual key or a different joystick belongs to
+        // that view, not to this trackpad's gesture. Keep those inputs concurrent.
+        (event?.touches(for:self) ?? fallback).filter { $0.phase != .ended && $0.phase != .cancelled }.count
+    }
 }

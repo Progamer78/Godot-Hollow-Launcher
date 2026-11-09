@@ -1,4 +1,22 @@
-# Validation recorded November 7, 2026
+# Validation recorded November 8, 2026
+
+## EXE import, controller profiles and multitouch update - November 8
+
+Implemented EXE/PCK pairing, bounded generic Windows x64 PE key discovery, CommonCrypto GDEC validation, private per-game key storage and a version-3 Godot 3 bridge that sets the key before startup. No key bytes are included in source, logs or portable save/layout exports. The production C++ scanner compiled on Windows and found one candidate in the supplied Coffee EXE, matching the exact candidate previously verified against all 96 encrypted scripts. This does not establish Coffee gameplay or the Apple key handoff.
+
+Implemented per-game physical-controller rebinding, extra buttons exposed by Apple's controller API, left/right stick Gamepad/Keys/Mouse/Off modes, radial deadzone and mouse speed. Native controller driver forwarding is suppressed only while remapping is enabled; mapped gamepad input uses player one. Added editable pinned values and replacement of existing frozen targets, up to four independently tracked virtual sticks, custom key names and opt-in two/three-finger trackpad gestures. Mouse touch counting excludes fingers on other control views.
+
+All 23 Python/native helper tests passed without skips. Both complete Windows engines compiled with the shared tools module and each executed 73 native checks (146 total), including player-one button/axis events and releases, frozen-target replacement and 25 consecutive freeze updates without exhausting slots. Original sample PCKs actually executed in these tests. All 24 Swift files parse; syntax parsing does not validate Apple SDK types or runtime behavior.
+
+Actions now compiles the actual controller manager in its UIKit simulator check and runs PE discovery/CommonCrypto validation with an original synthetic encrypted-script fixture in the macOS model tests. These Apple checks have not run locally. The final iOS archive, per-game key handoff, original Coffee startup, physical 8BitDo buttons, stick mouse and touch gestures need Actions/device verification. No new IPA was produced locally. See exe-controller-update.json and docs/exe-controller-controls.md for the current result; the sections below preserve earlier observations.
+
+## Coffee original-executable encryption feasibility - November 8
+
+Inspected the supplied 32,985,088-byte Windows x64 executable without executing it. It is a conventional PE32+ Godot runtime with an external 1,903,140,032-byte PCK. Located the GDScript loader using its function-name string, RIP-relative references and PE runtime-function boundaries. Its writable-data references yielded one candidate key location, without using a game-specific key or hardcoding that location in the discovery procedure.
+
+Using the original Godot 3 GDEC format and Windows system AES, that candidate decrypted all 96 encrypted scripts. All 96 matched their embedded plaintext MD5 checksums, all began with GDSC, and all reported supported Godot 3 bytecode version 13. No original executable was run, no game files were changed, and no key bytes or decrypted scripts were written to output files. This verifies decryption feasibility, not actual game execution with the recovered key.
+
+This supports a general import path for this class of recognizable Godot 3 Windows x64 exports, with bounded PE inspection and cryptographic candidate validation. It does not demonstrate a universal extractor across different compilers, stripped identifiers, obfuscation, pack encryption formats or other platforms. At the time of this investigation, the app still needed EXE-plus-PCK pairing, private per-game key management, an import-validation path accepting a validated key, and a Godot 3 bridge that supplies that key before initialization. Existing runtime keys must never be shared accidentally between games. See coffee-exe-feasibility.json and the local build/coffee-exe-proof evidence.
 
 ## Simulator display-frame timing repair - November 8
 

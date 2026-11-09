@@ -1,0 +1,103 @@
+{
+  "date": "2026-11-08",
+  "patch_revision": "exe-key-controller-multitouch-v10",
+  "bridge_version": 3,
+  "implemented": [
+    "EXE/PCK pairing and bounded generic Godot 3 x64 PE script-key discovery",
+    "GDEC AES validation and private per-game key startup configuration",
+    "Per-game physical-controller rebinding and independently exposed extra buttons",
+    "Either physical stick as mouse with speed/deadzone and click bindings",
+    "Editable saved pins and in-place frozen-target replacement",
+    "Up to four virtual sticks, independent axis ownership and custom keys",
+    "Opt-in two/three-finger trackpad gestures and scroll"
+  ],
+  "verified": {
+    "python_native_helper_tests": {
+      "passed": 23,
+      "skipped": 0
+    },
+    "swift_syntax": {
+      "files": 24,
+      "errors": 0,
+      "apple_sdk_typecheck": false
+    },
+    "desktop_native_engines": {
+      "3": {
+        "engine_major": 3,
+        "checks_passed": 73,
+        "runtime": "locally compiled official release plus PlayerTools",
+        "result": "passed",
+        "ios_ui": "not tested"
+      },
+      "4": {
+        "engine_major": 4,
+        "checks_passed": 73,
+        "runtime": "locally compiled official release plus PlayerTools",
+        "result": "passed",
+        "ios_ui": "not tested"
+      }
+    },
+    "production_pe_scanner": {
+      "compiled": true,
+      "reference": "supplied Coffee Windows x64 EXE (inspected only, not executed)",
+      "candidate_count": 1,
+      "matches_previously_verified_candidate": true,
+      "key_bytes_recorded": false,
+      "prior_script_validation": {
+        "scripts": 96,
+        "matching_plaintext_md5": 96,
+        "bytecode_version": 13
+      }
+    },
+    "workflow_yaml_and_python_ast": "passed"
+  },
+  "not_verified": [
+    "Apple CommonCrypto bridge compilation and execution",
+    "Updated Swift Apple SDK type-checking and simulator tests",
+    "iOS archive, IPA and device runtime key handoff",
+    "Coffee gameplay/startup using the recovered key",
+    "8BitDo hardware, extra buttons, controller mouse and touch gestures on iPhone"
+  ],
+  "ipa_produced": false,
+  "limits": [
+    "Recognized Godot 3 Windows x64 layouts only; not universal encryption recovery",
+    "Native game dependencies remain unsupported",
+    "Extra buttons must be independently exposed by iOS/firmware",
+    "One first-connected physical controller profile, one game per app process"
+  ],
+  "sha256": {
+    ".github/workflows/ios-player.yml": "4ec2d4257432f802ab0548f5004b23ffe371ed8d751bf762ad28ef21eb92942a",
+    "ios/ExecutableCore.h": "723ba9aeb80943fcfe926ee1541a9fbc7211eedae9f9274adf9f5e4df2d40fda",
+    "ios/ExecutableCore.inc": "8b00d86567f1adadf6a1d370c0b64520984c390927c14c1492f540f1b2a0968f",
+    "ios/ArchiveSupport.h": "20e0bd5fefc693aabc408a689a663dccf3d4d2b56d9edd8a94d8297ba93f31c3",
+    "ios/ArchiveSupport.mm": "39947c7f1b46f5e3a0940aebbc3e1b3c5b4bc541fede46c582746e5aa0616891",
+    "ios/ExecutableImport.swift": "182f0ceb853423b730b02ebcbc0f6a73c322b7d02f1b8acd06d6d7974da68145",
+    "ios/ControllerProfile.swift": "710323d30ba081bf6db552fc91268d29a22a6cbb41ff30ff51532dd09d6d608f",
+    "ios/ControllerInput.swift": "f9403c2ccf07a3c790a43146887a566be689b5adb2f89640dc1d05017d19ba4e",
+    "ios/GestureEditor.swift": "9772dfa69c90bbce127ec98fc24f61781965b9daa49c98415f9a42b37a65c24c",
+    "ios/ControlProfile.swift": "315cb9f9e1a83847806ee657073b90b87c72919800abf5eba2f7f2819b6e4e74",
+    "ios/GameControls.swift": "e79583bedddfd051422bc62e14cf1071e3367f1aba780bf418476d34aa33ce8d",
+    "ios/GameInput.swift": "c9d8209f682d31e9aea516c2703dadde1b7a65a24d88876a4de67e2ca31a8790",
+    "ios/GameLibrary.swift": "c2b9726c89fcc4e8d0996d0debbd469ce2308f473ac7527a970e9e8c771a1c9d",
+    "ios/GameTools.swift": "c4fd34745bd23302cf77f6c6563ea12a3bc805c8b5a1459150324b0ba673c706",
+    "ios/Godot3API.h": "d23e2a1387794bfcf0924b2e6f89b888abfa97c92bf1a5bb879a366e304de82c",
+    "ios/InputViews.swift": "56405b41afc98945dc24177125360b58c21fb3c360704a09b471ef03c6a64391",
+    "ios/Joystick.swift": "2e8e941c7e163dadea83b4bd3bce263b841251b25707ada7b8499ed4919b4a2c",
+    "ios/PCKInspector.swift": "cedc1fbd6a8a8bb19245aed59766993a52cf51a6c3e9c0b79a396a2926090f4d",
+    "ios/PackageImport.swift": "8f5c3df3b993fe2e93b4f235b452bb9240cf45f1e2c822645b7e5cc920fc6245",
+    "ios/PlayerApp.swift": "90aaae1281c3101c6a00311d541987f75480f5a7fdb09804ad2e5803c6e12dc9",
+    "ios/PlayerRuntime.h": "c0254aaf829189e09c25471c2a18a7dfba9b0088622641b719c7c5bcc5e26bc7",
+    "ios/player_runtime.mm": "cfc78c4595dc20d269272eb2a4bad2285192799120ea2d4ab5527302a03411c9",
+    "runtime3/player3_runtime.mm": "eca86fab7ac57542c582e7b835fa014fdadc2c1a35ec05c784e2b58415ba3176",
+    "runtime_shared/player_tools/player_tools.cpp": "7bdd20e34d7ffb547841b3e841c9a512694cca091b26e814a6ce79fa55977955",
+    "tools/patch_engine.py": "aed2080bbefa8703ecfd92b96f69d7eed05f3c881c71b023ea7282f883c8a4b8",
+    "tools/patch_godot3.py": "32d117308ef52f7a46ef30006fdb8bc3aaa8492aa46322b21a8a11a6352cf857",
+    "tools/check_input_ui.py": "0b9934de8dc5b8d57564a0729448f8b514e2a787b8288837c1382ef1261d4d24",
+    "tools/package_fixtures.py": "05e11685988e2403d99e435f78b1529438230d1f8230393e6a5206fa883ce6f8",
+    "tests/executable_core.cpp": "5f91fa08a43c5e751439b03bb6604a6b1ec671649b89a0d4d6e8a43d24560ca1",
+    "tests/test_executable.py": "4fe468d1cac0a8858b5c58e3d38fa69abe14c7cbae8d567786b19d9ad87f64e6",
+    "tests/models/main.swift": "0de322e56397188040625eacdb25da4914807508c381e41860bf2675bf46574a",
+    "tests/input-ui/main.swift": "a118923381e634c2bb3f1ec92d9d67673d75169a48b0c5c19ffb7688446bf872",
+    "samples/tools-proof/Main.gd": "e3d80f3947ac393c192fced60cb4ad65d959fa03c5709b9e64cac4447ac5d793"
+  }
+}

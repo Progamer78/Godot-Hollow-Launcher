@@ -3,10 +3,40 @@
 #include <memory>
 #import "ArchiveSupport.h"
 #include "ArchiveCore.inc"
+#include "ExecutableCore.inc"
+#import <CommonCrypto/CommonCryptor.h>
+#import <CommonCrypto/CommonDigest.h>
 static void archive_error(NSError **error, const std::string &message) {
     if (error) *error = [NSError errorWithDomain:@"GodotPlayer.Archive" code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:message.c_str()] ?: @"Archive error"}];
 }
 @implementation GPArchive
++ (NSArray<NSData *> *)candidateKeys:(NSString *)path error:(NSError **)error {
+    FILE *file=std::fopen(path.fileSystemRepresentation,"rb");
+    if(!file) { archive_error(error,"Cannot read original executable."); return nil; }
+    if(fseeko(file,0,SEEK_END)!=0) { std::fclose(file); archive_error(error,"Cannot seek executable."); return nil; }
+    off_t length=ftello(file); rewind(file);
+    if(length<64 || length>128*1024*1024) { std::fclose(file); archive_error(error,"EXE inspection supports files up to 128 MB."); return nil; }
+    std::vector<uint8_t> bytes(size_t(length),0); bool read=std::fread(bytes.data(),1,bytes.size(),file)==bytes.size(); std::fclose(file);
+    std::vector<std::array<uint8_t,32>> keys; std::string message;
+    if(!read || !PlayerExecutable::candidates(bytes,keys,message)) { archive_error(error,read?message:"Truncated executable."); return nil; }
+    NSMutableArray *result=[NSMutableArray arrayWithCapacity:keys.size()];
+    for(auto &key:keys) [result addObject:[NSData dataWithBytes:key.data() length:32]];
+    return result;
+}
++ (NSData *)decryptScript:(NSData *)bytes key:(NSData *)key error:(NSError **)error {
+    auto fail=[&]() -> NSData* { archive_error(error,"The original executable does not match these encrypted scripts, or its encryption format is unsupported."); return nil; };
+    if(key.length!=32 || bytes.length<48 || bytes.length>16*1024*1024) return fail();
+    const uint8_t *p=(const uint8_t*)bytes.bytes;
+    if(std::memcmp(p,"GDEC",4)!=0 || p[4]!=1 || p[5] || p[6] || p[7]) return fail();
+    uint64_t length=0; for(int i=0;i<8;i++) length|=uint64_t(p[24+i])<<(8*i);
+    if(length<8 || length>16*1024*1024 || ((length+15)&~uint64_t(15))!=bytes.length-32) return fail();
+    NSMutableData *plain=[NSMutableData dataWithLength:bytes.length-32]; size_t moved=0;
+    if(CCCrypt(kCCDecrypt,kCCAlgorithmAES,kCCOptionECBMode,key.bytes,32,nullptr,p+32,bytes.length-32,plain.mutableBytes,plain.length,&moved)!=kCCSuccess || moved<length) return fail();
+    plain.length=NSUInteger(length); unsigned char digest[CC_MD5_DIGEST_LENGTH];
+    CC_MD5(plain.bytes,CC_LONG(plain.length),digest);
+    if(std::memcmp(digest,p+8,16)!=0 || std::memcmp(plain.bytes,"GDSC",4)!=0) return fail();
+    return plain;
+}
 + (NSArray<NSDictionary *> *)entriesAtPath:(NSString *)path error:(NSError **)error {
     std::vector<PlayerArchive::Entry> entries; std::string message;
     if (!PlayerArchive::list(path.fileSystemRepresentation, entries, message)) { archive_error(error, message); return nil; }

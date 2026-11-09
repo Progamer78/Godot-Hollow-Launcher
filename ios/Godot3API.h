@@ -17,5 +17,7 @@ typedef struct {
     BOOL (*cursorVisible)(void);
     double (*aspectRatio)(void);
     NSString *(*tools)(NSString *);
+    BOOL (*scriptKey)(NSData * _Nullable);
+    void (*controllerOverride)(BOOL);
 } GP3API;
 typedef const GP3API *(*GP3GetAPIFunction)(void);

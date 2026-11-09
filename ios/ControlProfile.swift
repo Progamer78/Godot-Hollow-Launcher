@@ -1,6 +1,9 @@
 import Foundation
 
-struct JoystickControl: Codable, Equatable {
+struct JoystickControl: Codable, Equatable, Identifiable {
+    var identifier: UUID?
+    var zone: String?
+    var id: UUID { identifier ?? UUID(uuidString:"00000000-0000-0000-0000-000000000001")! }
     var mode = "fixed"
     var x = 0.2
     var y = 0.76
@@ -31,10 +34,11 @@ struct JoystickControl: Codable, Equatable {
         y = y.isFinite ? min(1, max(0, y)) : 0.76
         diameter = diameter.isFinite ? min(220, max(90, diameter)) : 128
         deadzone = deadzone.isFinite ? min(0.5, max(0.08, deadzone)) : 0.18
-        if !ControlKeys.all.contains(up) { up = "Up" }
-        if !ControlKeys.all.contains(down) { down = "Down" }
-        if !ControlKeys.all.contains(left) { left = "Left" }
-        if !ControlKeys.all.contains(right) { right = "Right" }
+        if let zone=zone, !["full","left","right"].contains(zone) { self.zone=nil }
+        up=String(up.trimmingCharacters(in:.whitespacesAndNewlines).prefix(32)); if up.isEmpty { up="Up" }
+        down=String(down.trimmingCharacters(in:.whitespacesAndNewlines).prefix(32)); if down.isEmpty { down="Down" }
+        left=String(left.trimmingCharacters(in:.whitespacesAndNewlines).prefix(32)); if left.isEmpty { left="Left" }
+        right=String(right.trimmingCharacters(in:.whitespacesAndNewlines).prefix(32)); if right.isEmpty { right="Right" }
     }
 
     // Values are relative to the stick radius. A radial deadzone prevents
@@ -93,6 +97,10 @@ struct ControlProfile: Codable, Equatable {
     var mouseMode = "trackpad"
     var mouseSensitivity = 1.0
     var joystick: JoystickControl?
+    var additionalJoysticks: [JoystickControl]?
+    var controller: ControllerProfile?
+    var gestures: TouchGestures?
+    var sticks: [JoystickControl] { (joystick.map { [$0] } ?? []) + (additionalJoysticks ?? []) }
     var opacity: Double?
     var highContrast: Bool?
     var haptics: Bool?
@@ -149,8 +157,22 @@ struct ControlProfile: Codable, Equatable {
         mouseSensitivity = mouseSensitivity.isFinite ? min(3, max(0.25, mouseSensitivity)) : 1
         if !["trackpad", "direct"].contains(mouseMode) { mouseMode = "trackpad" }
         joystick?.constrain()
-        if joystick?.mode == "floating" { mouseEnabled = false }
+        var identities=Set<UUID>(); if let first=joystick { identities.insert(first.id) }
+        additionalJoysticks=additionalJoysticks.map { Array($0.filter { identities.insert($0.id).inserted }.prefix(3)).map { value in var stick=value; stick.constrain(); return stick } }
+        if sticks.contains(where: { $0.mode == "floating" }) { mouseEnabled = false }
+        controller?.constrain()
+        gestures?.constrain()
         if let opacity = opacity { self.opacity = opacity.isFinite ? min(1, max(0.2, opacity)) : 0.7 }
+    }
+}
+
+struct TouchGestures: Codable, Equatable {
+    var enabled=false
+    var twoFingerTap="Mouse Right"
+    var threeFingerTap="Escape"
+    var scroll=true
+    mutating func constrain() {
+        twoFingerTap=String(twoFingerTap.prefix(32)); threeFingerTap=String(threeFingerTap.prefix(32))
     }
 }
 

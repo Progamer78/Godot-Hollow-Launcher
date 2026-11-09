@@ -260,6 +260,7 @@ class BuildToolsTests(unittest.TestCase):
             "drivers/apple_embedded/display_server_apple_embedded.h",
             "drivers/apple_embedded/display_server_apple_embedded.mm",
             "drivers/apple_embedded/SCsub",
+            "drivers/sdl/joypad_sdl.cpp",
         ]
         engine = ROOT / ".cache/godot-source"
         archive = ROOT / ".cache/source.zip"

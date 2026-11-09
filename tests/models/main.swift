@@ -220,3 +220,44 @@ do {
     require(analog.0 > 0 && analog.0 < 1 && analog.1 == 0, "Analog sticks retain intermediate strength")
 }
 print("Native archives, APK assets, embedded PCKs, save backup/restore/transfer/retention and analog/control presets passed")
+
+do {
+    let folder=URL(fileURLWithPath:"build/archive-tests")
+    let pack=folder.appendingPathComponent("encrypted-fixture.pck")
+    let recovered=try ExecutableImport.recover(executable:folder.appendingPathComponent("original-fixture.exe"),pack:pack)
+    require(recovered.0.major == 3 && recovered.0.encryptedScriptCount == 1 && recovered.0.scriptVersions == [13],"Actual PE discovery and AES validation must accept the original encrypted-script fixture")
+    require(recovered.1 == Data((0..<32).map { UInt8($0) }),"Recovered fixture key must match its original runtime data")
+    do { _ = try ExecutableImport.inspect(pack,key:Data(repeating:0,count:32)); fatalError("Mismatched executable key accepted") } catch {}
+    do { _ = try ExecutableImport.inspect(pack,key:nil); fatalError("Encrypted scripts accepted without original runtime") } catch {}
+    var controls=ControlProfile.legacy(directions:"arrows",extras:"")
+    var first=JoystickControl();first.identifier=UUID();first.mode="floating";first.zone="left"
+    first.up="F13"
+    var second=JoystickControl();second.identifier=UUID();second.mode="floating";second.zone="right";second.axis=2
+    controls.joystick=first;controls.additionalJoysticks=[second];controls.controller=ControllerProfile();controls.gestures=TouchGestures()
+    controls.controller?.enabled=true;controls.controller?.rightMode="mouse";controls.controller?.bindings["A"]="Mouse Left"
+    controls.constrain()
+    let decoded=try JSONDecoder().decode(ControlProfile.self,from:JSONEncoder().encode(controls))
+    require(decoded == controls && decoded.sticks.count == 2 && decoded.sticks[0].up == "F13","Multiple stick identities, custom keys, controller mappings and gestures must persist")
+    require(decoded.controller?.mouseEnabled == true && decoded.controller?.target("A") == "Mouse Left","Controller stick mouse and click mappings persist")
+    let neutral=decoded.controller!.stick(0.01,0)
+    let moving=decoded.controller!.stick(0.7,0)
+    require(neutral.0 == 0 && moving.0 > 0 && moving.0 < 1,"Physical controller deadzone retains analog strength")
+    let storedGame=reopened.games[0]
+    let privateFolder=reopened.directory(storedGame.id)
+    try FileManager.default.createDirectory(at:privateFolder,withIntermediateDirectories:true)
+    let privateKeyFile=privateFolder.appendingPathComponent("script-key.bin")
+    try recovered.1!.write(to:privateKeyFile)
+    let storedKey=try reopened.scriptKey(storedGame)
+    require(storedKey == recovered.1,"Private key is read for the same stable game identity")
+    try Data(repeating:0,count:33).write(to:privateKeyFile)
+    do { _ = try reopened.scriptKey(storedGame); fatalError("Oversized private key accepted") } catch {}
+    try FileManager.default.removeItem(at:privateKeyFile)
+    var pinGame=storedGame
+    pinGame.savedCheats=[SavedCheat(name:"Coins",label:"/root/Game.coins",type:"int",value:"10")]
+    reopened.update(pinGame)
+    pinGame.savedCheats?[0].value="9223372036854775807"
+    reopened.update(pinGame)
+    let editedPins=GameLibrary(storageRoot:storage,savesRoot:temporary.appendingPathComponent("Saves"))
+    require(editedPins.games[0].savedCheats?[0].value == "9223372036854775807","Editing a pinned value persists exact integer text")
+}
+print("Original EXE key discovery, real AES validation, multiple sticks and controller profile persistence passed")

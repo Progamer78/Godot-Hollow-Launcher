@@ -119,7 +119,7 @@ final class GameLibrary: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
-    func importPack(_ source: URL, replacing existing: Game? = nil, engineHint: UInt32? = nil) {
+    func importPack(_ source: URL, companion: URL? = nil, replacing existing: Game? = nil, engineHint: UInt32? = nil) {
         guard !importing, pendingImport == nil else { return }
         guard manifestUsable else { error = "The library manifest needs recovery before importing."; return }
         importing = true
@@ -127,7 +127,10 @@ final class GameLibrary: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             let access = source.startAccessingSecurityScopedResource()
             defer { if access { source.stopAccessingSecurityScopedResource() } }
-            let result: Result<(PackInfo, String?), Error> = Result {
+            let companionAccess = companion?.startAccessingSecurityScopedResource() ?? false
+            defer { if companionAccess { companion?.stopAccessingSecurityScopedResource() } }
+            let result: Result<(PackInfo, String?, Data?), Error> = Result {
+                if let companion = companion, !companion.isFileURL || companion.pathExtension.lowercased() != "exe" { throw PackError.invalid("The companion must be the original EXE file.") }
                 guard source.isFileURL, PackageImport.extensions.contains(source.pathExtension.lowercased()) else { throw PackError.invalid("Choose a PCK, ZIP, APK, or embedded-PCK EXE.") }
                 var coordinationError: NSError?
                 var copyError: Error?
@@ -141,25 +144,44 @@ final class GameLibrary: ObservableObject {
                 }
                 if let error = coordinationError { throw error }
                 if let error = copyError { throw error }
-                let info = try PCKInspector.inspect(staging)
-                return (info, note)
+                let original = companion ?? (source.pathExtension.lowercased() == "exe" ? source : nil)
+                if let original = original {
+                    var recovered: (PackInfo, Data?)?
+                    var recoveryError: Error?
+                    var recoveryCoordination: NSError?
+                    NSFileCoordinator().coordinate(readingItemAt: original, options: [], error: &recoveryCoordination) { readable in
+                        do {
+                            let values = try readable.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+                            guard values.isRegularFile == true, values.isSymbolicLink != true else { throw PackError.invalid("Choose a regular original EXE.") }
+                            recovered = try ExecutableImport.recover(executable: readable, pack: staging)
+                        } catch { recoveryError = error }
+                    }
+                    if let error = recoveryCoordination { throw error }
+                    if let error = recoveryError { throw error }
+                    guard let recovered = recovered else { throw PackError.invalid("Original executable could not be inspected.") }
+                    if recovered.1 != nil { note = (note.map { $0 + " " } ?? "") + "Original runtime script key recovered and all encrypted scripts validated. Game files are unchanged." }
+                    return (recovered.0, note, recovered.1)
+                }
+                let key = try existing.flatMap { try self.scriptKey($0) }
+                let info = try ExecutableImport.inspect(staging, key: key)
+                return (info, note, (info.encryptedScriptCount ?? 0) > 0 ? key : nil)
             }
             DispatchQueue.main.async {
                 defer { self.importing = false }
                 do {
-                    let (info, note) = try result.get()
+                    let (info, note, key) = try result.get()
                     if let game = existing {
-                        self.pendingImport = ImportCandidate(game: game, pack: info, note: note, staging: staging)
+                        self.pendingImport = ImportCandidate(game: game, pack: info, note: note, staging: staging, key: key)
                         return
                     }
                     defer { try? self.files.removeItem(at: staging) }
-                    try self.install(staging: staging, info: info, note: note, name: source.deletingPathExtension().lastPathComponent, existing: nil)
+                    try self.install(staging: staging, info: info, note: note, name: source.deletingPathExtension().lastPathComponent, existing: nil, key: key)
                 } catch { try? self.files.removeItem(at: staging); self.error = "Import failed: \(error.localizedDescription)" }
             }
         }
     }
 
-    private func install(staging: URL, info: PackInfo, note: String?, name: String, existing: Game?) throws {
+    private func install(staging: URL, info: PackInfo, note: String?, name: String, existing: Game?, key: Data?) throws {
         var game: Game
         if let existing = existing {
             guard let current = games.first(where: { $0.id == existing.id }) else { throw PackError.invalid("The game was removed while importing.") }
@@ -171,6 +193,7 @@ final class GameLibrary: ObservableObject {
         try self.files.createDirectory(at: self.directory(game.id), withIntermediateDirectories: true)
         let destination = self.packURL(game)
         let backup = self.directory(game.id).appendingPathComponent("previous.pck")
+        let previousKey = try existing.flatMap { try scriptKey($0) }
         if existing != nil {
             // Atomic replacement leaves the old pack intact on a failed copy.
             if self.files.fileExists(atPath: backup.path) { try self.files.removeItem(at: backup) }
@@ -179,8 +202,10 @@ final class GameLibrary: ObservableObject {
             try self.files.moveItem(at: staging, to: destination)
         }
         do {
+            try storeKey(key, game: game)
             try self.persist(existing == nil ? self.games + [game] : self.games.map { $0.id == game.id ? game : $0 })
         } catch {
+            try? storeKey(previousKey, game: game)
             if existing != nil, self.files.fileExists(atPath: backup.path) {
                 _ = try? self.files.replaceItemAt(destination, withItemAt: backup)
             } else if existing == nil {
@@ -206,7 +231,7 @@ final class GameLibrary: ObservableObject {
                 defer { self.importing = false; self.pendingImport = nil; try? self.files.removeItem(at: pending.staging) }
                 do {
                     _ = try result.get()
-                    try self.install(staging: pending.staging, info: pending.pack, note: pending.note, name: pending.game.name, existing: pending.game)
+                    try self.install(staging: pending.staging, info: pending.pack, note: pending.note, name: pending.game.name, existing: pending.game, key: pending.key)
                 } catch { self.error = "Replacement failed: \(error.localizedDescription)" }
             }
         }
@@ -214,7 +239,7 @@ final class GameLibrary: ObservableObject {
 
     func prepare(_ game: Game) throws {
         // Reinspect the private copy immediately before native initialization.
-        let info = try PCKInspector.inspect(packURL(game))
+        let info = try ExecutableImport.inspect(packURL(game), key: scriptKey(game))
         var checked = game
         checked.pack = info
         if let reason = RuntimeSelection.problem(for: checked) { throw PackError.invalid(reason) }
@@ -223,6 +248,28 @@ final class GameLibrary: ObservableObject {
     }
 
     var vault: SaveVault { SaveVault(root: root.appendingPathComponent("Backups"), saves: saves) }
+    func scriptKey(_ game: Game) throws -> Data? {
+        let url = directory(game.id).appendingPathComponent("script-key.bin")
+        guard files.fileExists(atPath: url.path) else { return nil }
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true, values.fileSize == 32 else { throw PackError.invalid("The private script key needs reimporting from the original EXE.") }
+        let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
+        let data = try handle.read(upToCount: 33) ?? Data()
+        guard data.count == 32 else { throw PackError.invalid("Invalid private script key length.") }
+        return data
+    }
+    private func storeKey(_ key: Data?, game: Game) throws {
+        let url = directory(game.id).appendingPathComponent("script-key.bin")
+        if let key = key {
+            guard key.count == 32 else { throw PackError.invalid("Invalid private script key length.") }
+            #if os(iOS)
+            try key.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            #else
+            try key.write(to: url, options: .atomic)
+            #endif
+            try files.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } else if files.fileExists(atPath: url.path) { try files.removeItem(at: url) }
+    }
     func journal(_ game: Game, status: String) {
         do {
             try JSONEncoder().encode(LaunchJournal(status: status, date: Date())).write(to: directory(game.id).appendingPathComponent("launch.json"), options: .atomic)
@@ -246,4 +293,5 @@ struct ImportCandidate: Identifiable {
     let pack: PackInfo
     let note: String?
     let staging: URL
+    let key: Data?
 }

@@ -59,7 +59,7 @@ enum PackageImport {
         guard length >= 16 else { throw PackError.invalid("No embedded PCK footer found.") }
         try input.seek(toOffset: length - 12)
         let footer = try input.read(upToCount: 12) ?? Data()
-        guard footer.count == 12, footer.suffix(4) == Data("GDPC".utf8) else { throw PackError.invalid("This executable has no supported embedded PCK footer. The executable will not be run.") }
+        guard footer.count == 12, footer.suffix(4) == Data("GDPC".utf8) else { throw PackError.invalid("This EXE keeps its game data separately. Select the original EXE and its PCK together in Import Game. Windows code is never executed.") }
         let size = footer.prefix(8).enumerated().reduce(UInt64(0)) { $0 | UInt64($1.element) << (8 * $1.offset) }
         guard size >= 84, size <= length - 12 else { throw PackError.invalid("Invalid embedded PCK size.") }
         try input.seek(toOffset: length - 12 - size)

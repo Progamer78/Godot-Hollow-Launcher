@@ -106,6 +106,15 @@ func run_checks():
     money = 1
     tools.request({"action": "tick"})
     check(money == 60, "freeze tick restores desired value")
+    check(tools.request({"action":"freeze","target":candidates.rows[0],"value":"70"}).ok, "existing freeze accepts an edited pin value")
+    money = 3
+    tools.request({"action":"tick"})
+    check(money == 70, "updated freeze replaces the old pinned value")
+    var reused_freeze_slot = true
+    for _i in range(25):
+        if not tools.request({"action":"freeze","target":candidates.rows[0],"value":"70"}).ok:
+            reused_freeze_slot = false
+    check(reused_freeze_slot, "editing a pinned freeze reuses its slot instead of hitting the 20-freeze limit")
     tools.request({"action": "clear_freezes"})
     money = 2
     tools.request({"action": "tick"})
@@ -130,6 +139,13 @@ func run_checks():
     Input.flush_buffered_events()
     check(Input.get_joy_axis(device, 0) == 0 and not Input.is_joy_button_pressed(device, 0), "focus release clears analog and gamepad holds")
     check(not tools.request({"action": "input", "kind": "axis", "axis": 99, "value": 0}).ok, "invalid axis refused")
+    check(tools.request({"action":"input","kind":"button","button":0,"pressed":true,"device":0}).ok,"remapped controller targets player one")
+    Input.flush_buffered_events()
+    check(Input.is_joy_button_pressed(0,0),"player-one games receive remapped gamepad button")
+    tools.request({"action":"input","kind":"button","button":0,"pressed":false,"device":0})
+    Input.flush_buffered_events()
+    check(not Input.is_joy_button_pressed(0,0),"player-one remapping releases the button")
+    check(not tools.request({"action":"input","kind":"button","button":0,"pressed":true,"device":99}).ok,"invalid output player refused")
     check(tools.request({"action": "input", "kind": "text", "text": "Aé🙂"}).ok, "Unicode text events accepted")
     Input.flush_buffered_events()
     check(typed_codes.size() >= 3 and typed_codes[typed_codes.size() - 3] == 65 and typed_codes[typed_codes.size() - 2] == 233 and typed_codes[typed_codes.size() - 1] == 128578, "scene receives full Unicode text key events")

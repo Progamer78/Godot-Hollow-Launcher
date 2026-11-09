@@ -4,6 +4,8 @@
 NS_ASSUME_NONNULL_BEGIN
 // Select one engine per process. Godot 3 lives in a separate bundled image.
 @interface PlayerRuntime : NSObject
++ (BOOL)configureScriptKey:(nullable NSData *)key;
++ (void)configureController:(BOOL)enabled;
 + (nullable UIViewController *)startPack:(NSString *)packPath
                                savePath:(NSString *)savePath
                                renderer:(NSString *)renderer

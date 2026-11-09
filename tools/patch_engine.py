@@ -4,7 +4,7 @@ import argparse
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH_REVISION = "input-lifetime-keyboard-v9"
+PATCH_REVISION = "exe-key-controller-multitouch-v10"
 
 
 def replace(path, old, new):
@@ -19,6 +19,9 @@ def patch(engine):
     if "import SwiftUI" not in (apple / "app.swift").read_text(encoding="utf-8"):
         raise RuntimeError("Expected an unmodified official Apple entry point; refusing to patch twice.")
     shutil.copytree(ROOT / "runtime_shared/player_tools", engine / "modules/player_tools")
+    sdl = engine / "drivers/sdl/joypad_sdl.cpp"
+    replace(sdl, '#include "joypad_sdl.h"', '#include "joypad_sdl.h"\n#ifdef IOS_ENABLED\nextern bool player_should_filter_controller();\n#else\nstatic bool player_should_filter_controller() { return false; }\n#endif')
+    sdl.write_text(sdl.read_text(encoding="utf-8").replace('Input::get_singleton()->joy_axis(', 'if (!player_should_filter_controller()) Input::get_singleton()->joy_axis(').replace('Input::get_singleton()->joy_button(', 'if (!player_should_filter_controller()) Input::get_singleton()->joy_button(').replace('Input::get_singleton()->joy_hat(', 'if (!player_should_filter_controller()) Input::get_singleton()->joy_hat('), encoding="utf-8")
     # Keep upstream's actual SwiftUI entry point, app delegate and render view.
     # Swap only its immediate game view for the native pack chooser.
     for source in (ROOT / "ios").iterdir():

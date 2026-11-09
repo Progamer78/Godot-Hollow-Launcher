@@ -9,6 +9,7 @@ struct PackInfo: Codable, Equatable {
     let byteCount: UInt64
     var nativeFiles: [String]?
     var scriptVersions: [UInt32]?
+    var encryptedScriptCount: Int?
     var version: String { "\(major).\(minor).\(patch)" }
 }
 
@@ -22,7 +23,7 @@ enum PackError: LocalizedError {
 // Implements PackedSourcePCK::try_open_pack in the pinned official engine.
 // Inspect only the header and directory; game assets are never extracted.
 enum PCKInspector {
-    static func inspect(_ url: URL) throws -> PackInfo {
+    static func inspect(_ url: URL, decryptScript: ((Data) throws -> Data)? = nil) throws -> PackInfo {
         let reader = try PackReader(url)
         guard try reader.u32() == 0x43504447 else { throw PackError.invalid("Not a standalone Godot PCK (GDPC header missing).") }
         let format = try reader.u32()
@@ -54,6 +55,7 @@ enum PCKInspector {
         var ranges: [(UInt64, UInt64)] = []
         var nativeFiles: [String] = []
         var encryptedScripts = 0
+        var encryptedEntries: [(UInt64, UInt64, String)] = []
         var encryptedExample = ""
         var compiledScripts: [(UInt64, UInt64, String)] = []
         for _ in 0..<count {
@@ -80,6 +82,7 @@ enum PCKInspector {
             let ext = (path as NSString).pathExtension.lowercased()
             if ext == "gde" {
                 encryptedScripts += 1
+                encryptedEntries.append((base + offset, size, path))
                 if encryptedExample.isEmpty || encryptedExample.hasPrefix("addons/") { encryptedExample = path }
             }
             if ext == "cs" { throw PackError.invalid("\(path) requires a .NET runtime, which is not included in this player.") }
@@ -93,10 +96,19 @@ enum PCKInspector {
             }
         }
         guard hasProject else { throw PackError.invalid("No project settings found. This is a resource-only or incomplete pack.") }
-        if encryptedScripts > 0 {
-            throw PackError.invalid("This Godot \(major) pack contains \(encryptedScripts) encrypted scripts (.gde), including \(encryptedExample). This player cannot decrypt them without the game's export encryption key. Use an unencrypted game export; changing the renderer or adding Godot 3 support cannot remove encryption.")
+        if encryptedScripts > 0 && (decryptScript == nil || major != 3) {
+            throw PackError.invalid("This Godot \(major) pack contains \(encryptedScripts) encrypted scripts, including \(encryptedExample). Select its original Godot 3 Windows x64 EXE together with the PCK to try automatic key recovery. Other encryption layouts require an unencrypted export.")
         }
         var versions = Set<UInt32>()
+        for (offset, length, path) in encryptedEntries {
+            guard length >= 48, length <= 16 * 1024 * 1024, let decrypt = decryptScript else { throw PackError.invalid("Unsupported encrypted script size: \(path)") }
+            try reader.seek(offset)
+            let plain = try decrypt(reader.read(Int(length)))
+            guard plain.count >= 12, plain.prefix(4) == Data("GDSC".utf8) else { throw PackError.invalid("Invalid decrypted script: \(path)") }
+            let version = plain[4..<8].enumerated().reduce(UInt32(0)) { $0 | UInt32($1.element) << (8 * $1.offset) }
+            guard version <= 13 else { throw PackError.invalid("Decrypted script needs a newer Godot 3 bytecode reader.") }
+            versions.insert(version)
+        }
         for (offset, length, path) in compiledScripts {
             guard length >= 12 else { throw PackError.invalid("Truncated compiled script: \(path)") }
             try reader.seek(offset)
@@ -115,7 +127,7 @@ enum PCKInspector {
             try reader.seek(offset)
             guard try reader.read(4) == Data("ECFG".utf8) else { throw PackError.invalid("Invalid project.binary signature.") }
         }
-        return PackInfo(format: format, major: major, minor: minor, patch: patch, fileCount: count, byteCount: reader.size, nativeFiles: nativeFiles.isEmpty ? nil : nativeFiles, scriptVersions: versions.isEmpty ? nil : versions.sorted())
+        return PackInfo(format: format, major: major, minor: minor, patch: patch, fileCount: count, byteCount: reader.size, nativeFiles: nativeFiles.isEmpty ? nil : nativeFiles, scriptVersions: versions.isEmpty ? nil : versions.sorted(), encryptedScriptCount: encryptedScripts == 0 ? nil : encryptedScripts)
     }
 }
 

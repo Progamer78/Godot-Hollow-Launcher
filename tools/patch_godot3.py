@@ -72,6 +72,8 @@ def patch(engine):
     bootstrap = ios / "godot_iphone.mm"
     replace(bootstrap, '\targc = add_path(argc, fargv);\n\targc = add_cmdline(argc, fargv);', '\t// Explicit player arguments only.')
     os_file = ios / "os_iphone.mm"
+    replace(os_file, 'void OSIPhone::joy_button(int p_device, int p_button, bool p_pressed) {', 'extern bool gp3_should_filter_controller();\nvoid OSIPhone::joy_button(int p_device, int p_button, bool p_pressed) {\n\tif (gp3_should_filter_controller()) return;')
+    replace(os_file, 'void OSIPhone::joy_axis(int p_device, int p_axis, float p_value) {', 'void OSIPhone::joy_axis(int p_device, int p_axis, float p_value) {\n\tif (gp3_should_filter_controller()) return;')
     replace(os_file, 'void OSIPhone::start() {\n\tMain::start();',
             'extern bool gp3_main_started;\nvoid OSIPhone::start() {\n\tgp3_main_started = Main::start();')
     anchor = 'Error OSIPhone::open_dynamic_library(const String p_path, void *&p_library_handle, bool p_also_set_library_path) {'

@@ -26,6 +26,7 @@ struct GameTools: View {
     @State private var search = "money"
     @State private var rows: [ToolStat] = []
     @State private var selected: ToolStat?
+    @State private var selectedPin: SavedCheat?
     @State private var status = ""
     @State private var truncated = false
     @State private var paused = false
@@ -79,6 +80,12 @@ struct GameTools: View {
         .onDisappear { _ = ToolsBridge.send(["action": "pause", "enabled": false]) }
         .sheet(item: $selected) { stat in
             StatEditor(stat: stat, gameID: gameID) { refresh() }
+        }
+        .sheet(item:$selectedPin) { pin in
+            SavedPinEditor(pin:pin,onSave:{ updated in
+                guard var game=library.games.first(where:{$0.id == gameID}), let index=game.savedCheats?.firstIndex(where:{$0.id == updated.id}) else { return }
+                game.savedCheats?[index]=updated; library.update(game)
+            })
         }
     }
 
@@ -159,6 +166,7 @@ struct GameTools: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(pin.name).font(.headline); Text("\(pin.label) = \(pin.value)").font(.caption)
                     HStack {
+                        Button("Edit Value") { selectedPin=pin }
                         Button("Apply") { apply(pin, frozen: false) }
                         Button("Freeze") { apply(pin, frozen: true) }
                         Button("Remove") {
@@ -225,6 +233,28 @@ struct GameTools: View {
         let reply = ToolsBridge.send(["action": "evaluate", "code": expression])
         history.insert("> \(expression)\n\(reply.ok ? "" : "Error: ")\(reply.message ?? "null")", at: 0)
         history = Array(history.prefix(20))
+    }
+}
+
+private struct SavedPinEditor: View {
+    @State var pin: SavedCheat
+    let onSave: (SavedCheat) -> Void
+    @Environment(\.presentationMode) private var presentation
+    var body: some View {
+        NavigationView {
+            Form {
+                TextField("Name",text:$pin.name)
+                Text(pin.label).font(.caption)
+                if pin.type == "bool" {
+                    Picker("Value",selection:$pin.value) { Text("True").tag("true"); Text("False").tag("false") }
+                } else { TextField("Pinned value",text:$pin.value).autocapitalization(.none).disableAutocorrection(true) }
+                Text("Save changes the reusable value. Apply sends it to the game; Freeze applies and holds it. To change an active freeze, use Freeze again after saving.").font(.caption)
+            }.navigationTitle("Edit Pinned Value")
+            .toolbar {
+                ToolbarItem(placement:.cancellationAction) { Button("Cancel") { presentation.wrappedValue.dismiss() } }
+                ToolbarItem(placement:.confirmationAction) { Button("Save") { pin.name=String(pin.name.prefix(80)); pin.value=String(pin.value.prefix(512)); onSave(pin); presentation.wrappedValue.dismiss() } }
+            }
+        }.navigationViewStyle(StackNavigationViewStyle())
     }
 }
 

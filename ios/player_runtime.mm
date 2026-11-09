@@ -1,6 +1,7 @@
 #import "PlayerRuntime.h"
 #import "Godot3API.h"
 #include <dlfcn.h>
+#include <atomic>
 #import "app_delegate_service.h"
 #import "godot_app_delegate.h"
 #import "godot_view_controller.h"
@@ -29,6 +30,9 @@ BOOL player_engine_ready = NO;
 BOOL player_main_started = NO;
 static NSString *requested_renderer;
 static BOOL attempted = NO;
+static NSData *pending_script_key;
+static std::atomic<bool> controller_override(false);
+bool player_should_filter_controller() { return controller_override.load(); }
 static const GP3API *godot3 = nullptr;
 NSString *player_orientation = nil;
 static NSMutableDictionary<NSString *, NSNumber *> *held_keys;
@@ -63,6 +67,26 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 @implementation PlayerRuntime
++ (BOOL)configureScriptKey:(NSData *)key {
+    if(attempted || (key && key.length!=32)) return NO;
+    pending_script_key=[key copy]; return YES;
+}
++ (void)configureController:(BOOL)enabled {
+    if (godot3) { godot3->controllerOverride(enabled); return; }
+    if (controller_override.load()==bool(enabled)) return;
+    if(enabled) controller_override.store(true);
+    Input *input=Input::get_singleton();
+    if(input) {
+        Array pads=input->get_connected_joypads();
+        for(int i=0;i<pads.size();i++) {
+            int device=pads[i];
+            for(int button=0;button<32;button++) input->joy_button(device,JoyButton(button),false);
+            for(int axis=0;axis<6;axis++) input->joy_axis(device,JoyAxis(axis),0);
+            input->joy_hat(device,HatMask::CENTER);
+        }
+    }
+    controller_override.store(enabled);
+}
 + (UIViewController *)startPack:(NSString *)packPath savePath:(NSString *)savePath renderer:(NSString *)renderer engineMajor:(NSInteger)major orientation:(NSString *)orientation error:(NSError **)error {
     NSAssert([NSThread isMainThread], @"Godot starts on the main thread");
     NSString *reason = nil;
@@ -79,13 +103,19 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
         void *image = dlopen(path.fileSystemRepresentation, RTLD_NOW | RTLD_LOCAL);
         GP3GetAPIFunction getAPI = image ? (GP3GetAPIFunction)dlsym(image, "GP3GetAPI") : nullptr;
         const GP3API *api = getAPI ? getAPI() : nullptr;
-        if (!api || api->version != 2) {
+        if (!api || api->version != 3) {
             const char *detail = dlerror();
             NSString *message = [NSString stringWithFormat:@"The bundled Godot 3 runtime could not load: %s. Make sure your signing tool signs embedded frameworks.", detail ?: "missing or incompatible runtime bridge"];
             if (error) *error = [NSError errorWithDomain:@"GodotPlayer" code:30 userInfo:@{NSLocalizedDescriptionKey:message}];
             return nil;
         }
         godot3 = api; // Deliberately retained until process exit; never dlclose.
+        if(!godot3->scriptKey(pending_script_key)) {
+            if(error) *error=[NSError errorWithDomain:@"GodotPlayer" code:31 userInfo:@{NSLocalizedDescriptionKey:@"Could not configure the Godot 3 script key."}];
+            return nil;
+        }
+        pending_script_key=nil;
+        godot3->controllerOverride(controller_override.load());
         return godot3->start(packPath, savePath, renderer, orientation, error);
     }
     player_save_path = [savePath copy];

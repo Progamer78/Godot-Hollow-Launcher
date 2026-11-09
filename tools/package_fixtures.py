@@ -29,3 +29,15 @@ def apk(pack, destination):
 if __name__=='__main__':
     output=Path('build/archive-tests');output.mkdir(parents=True,exist_ok=True)
     apk(Path('build/proof/movement.pck'),output/'movement-assets.apk')
+    import base64, hashlib, importlib.util
+    spec=importlib.util.spec_from_file_location('exe_fixture',Path(__file__).resolve().parents[1]/'tests/test_executable.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    (output/'original-fixture.exe').write_bytes(module.fixture())
+    encrypted=base64.b64decode('R0RFQwEAAAARnnc/7CJArt7Q9wRTTsAaDAAAAAAAAACQ/7fMiwOnJmMloYFnmBpl')
+    payloads=[('res://project.godot',b'config_version=4\n'),('res://proof.gde',encrypted)]
+    header=b'GDPC'+struct.pack('<IIII',1,3,6,3)+bytes(64)
+    offset=84+4+sum(4+len(name.encode())+32 for name,_ in payloads)
+    directory=struct.pack('<I',len(payloads))
+    for name,data in payloads:
+        name=name.encode();directory+=struct.pack('<I',len(name))+name+struct.pack('<QQ',offset,len(data))+hashlib.md5(data).digest();offset+=len(data)
+    (output/'encrypted-fixture.pck').write_bytes(header+directory+b''.join(data for _,data in payloads))

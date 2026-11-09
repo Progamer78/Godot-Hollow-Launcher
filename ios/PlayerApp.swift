@@ -29,6 +29,7 @@ struct PlayerRoot: View {
     @State private var sharedReport: URL?
     @State private var sharingReport = false
     @State private var layoutTarget: UUID?
+    @State private var controllerTarget: Game?
 
     private var visibleGames: [Game] {
         library.games.filter { game in
@@ -54,6 +55,7 @@ struct PlayerRoot: View {
                                 Text("Godot 3 assets").tag("3")
                                 Text("Godot 4 assets").tag("4")
                             }
+                            Text("Encrypted Godot 3 game? Select its original EXE and PCK together in Import Game.").font(.caption)
                         }
                         if library.games.isEmpty {
                             VStack(spacing: 12) {
@@ -97,10 +99,12 @@ struct PlayerRoot: View {
                 }.navigationViewStyle(StackNavigationViewStyle()).accentColor(.blue)
             }
         }
-        .fileImporter(isPresented: $picker, allowedContentTypes: [.data, .zip]) { result in
+        .fileImporter(isPresented: $picker, allowedContentTypes: [.data, .zip], allowsMultipleSelection: true) { result in
             switch result {
-            case .success(let url):
+            case .success(let urls):
+                guard let url = urls.first else { return }
                 if let id = layoutTarget {
+                    guard urls.count == 1 else { library.error = "Choose one layout JSON."; return }
                     defer { layoutTarget = nil }
                     let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
                     do {
@@ -112,9 +116,19 @@ struct PlayerRoot: View {
                         var profile = try JSONDecoder().decode(ControlProfile.self, from: data); profile.constrain()
                         _ = library.saveControls(profile, visible: true, for: id)
                     } catch { library.error = error.localizedDescription }
-                } else { library.importPack(url, replacing: replacement, engineHint: UInt32(importEngine)) }
+                } else if urls.count == 1 { library.importPack(url, replacing: replacement, engineHint: UInt32(importEngine)) }
+                else if urls.count == 2, let pack = urls.first(where: { $0.pathExtension.lowercased() == "pck" }), let exe = urls.first(where: { $0.pathExtension.lowercased() == "exe" }) {
+                    library.importPack(pack, companion: exe, replacing: replacement, engineHint: UInt32(importEngine))
+                } else { library.error = "Choose one game archive, or select its original EXE and PCK together for encrypted Godot 3 games." }
             case .failure(let error): layoutTarget = nil; library.error = error.localizedDescription
             }
+        }
+        .sheet(item:$controllerTarget) { game in
+            ControllerEditor(profile:game.controls.controller ?? ControllerProfile(),onSave:{ controller in
+                var profile=(library.games.first { $0.id == game.id } ?? game).controls
+                profile.controller=controller
+                _ = library.saveControls(profile,visible:game.showControls,for:game.id)
+            })
         }
         .onOpenURL { url in
             if session == nil { library.importPack(url) }
@@ -199,6 +213,7 @@ struct PlayerRoot: View {
                 Text("Play time: \(Int((game.playedSeconds ?? 0) / 60)) minutes").font(.caption)
             }
             Section(header: Text("Control layouts")) {
+                Button("Controller Bindings & Stick Mouse") { controllerTarget=game }
                 Menu("Apply a Preset") {
                     ForEach(ControlProfile.presetNames, id: \.self) { name in
                         Button(name) { _ = library.saveControls(.preset(name), visible: true, for: game.id) }
@@ -292,6 +307,8 @@ struct PlayerRoot: View {
                 do {
                     try result.get()
                     library.journal(game, status: "starting")
+                    guard PlayerRuntime.configureScriptKey(try library.scriptKey(game)) else { throw PackError.invalid("Close the app from the app switcher and reopen it before retrying a launch or starting another game.") }
+                    PlayerRuntime.configureController(game.controls.controller?.enabled == true)
                     let started: UIViewController? = try PlayerRuntime.startPack(library.packURL(game).path, savePath: library.saveURL(game).path, renderer: game.renderer, engineMajor: Int(game.pack.major), orientation: game.displayOrientation)
                     guard let controller = started else { throw PackError.invalid("The runtime did not create a game view.") }
                     session = GameSession(id: game.id, controller: controller, game: game, aspectRatio: PlayerRuntime.gameAspectRatio())

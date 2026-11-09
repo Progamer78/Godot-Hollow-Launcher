@@ -1,0 +1,27 @@
+{
+  "date": "2026-11-08",
+  "purpose": "Inspect the supplied original executable to establish whether general runtime-assisted encrypted-game import is feasible",
+  "executable": "FullGameReference/Anomalous_Coffee_Machine-v1.4-deluxe_windows/ACM_windows.exe",
+  "executable_bytes": 32985088,
+  "format": "PE32+ AMD64; ordinary text, read-only data, writable data and runtime function table",
+  "pack": "FullGameReference/Anomalous_Coffee_Machine-v1.4-deluxe_windows/ACM_windows.pck",
+  "pack_bytes": 1903140032,
+  "discovery": "Locate the Godot GDScript::load_byte_code function-name string; find its RIP-relative code references; identify the enclosing function through the PE runtime function table; enumerate references to writable data in that function",
+  "candidate_data_locations": 1,
+  "discovery_uses_game_name_or_hardcoded_key": false,
+  "verification": {
+    "method": "Godot 3 GDEC AES-256-ECB format, checked against official engine source; Windows system cryptography used for local verification",
+    "encrypted_scripts": 96,
+    "matching_decrypted_content_md5": 96,
+    "valid_GDSC_headers": 96,
+    "bytecode_version_13": 96,
+    "total_decrypted_script_bytes": 4574540
+  },
+  "original_executable_executed": false,
+  "original_executable_or_pack_modified": false,
+  "key_or_decrypted_script_files_written": false,
+  "game_started_with_recovered_key": false,
+  "ios_implementation_changed": false,
+  "assessment": "Verified key recovery and complete script decryption for this recognizable Godot 3 Windows x64 export layout. The game uses a separate PCK, so both EXE and PCK are needed. The existing app still requires an executable-inspection importer, validated per-game key handling, and Godot 3 runtime key configuration before startup. This does not establish arbitrary executable support or full game/iPhone compatibility.",
+  "local_evidence": "build/coffee-exe-proof/verification.json; candidate locations and script metadata in candidates.json; validation script verify.ps1; loader disassembly load-bytecode-0.asm"
+}

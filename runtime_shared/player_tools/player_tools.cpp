@@ -344,9 +344,15 @@ Dictionary PlayerTools::request(const Dictionary &command) {
     if (action == "options" || action == "status") return options(command);
     if (action == "find_numbers" || action == "refine_numbers") return find_numbers(command);
     if (action == "freeze") {
-        if (frozen.size() >= 20) return failure("Only 20 values can be frozen in one session.");
+        int existing=-1;
+        Dictionary target=command.get("target",Dictionary());
+        for(int i=0;i<frozen.size();i++) {
+            Dictionary prior=frozen[i], old_target=prior.get("target",Dictionary());
+            if(old_target.get("object",Variant())==target.get("object",Variant()) && old_target.get("path",Variant())==target.get("path",Variant())) { existing=i; break; }
+        }
+        if (existing < 0 && frozen.size() >= 20) return failure("Only 20 values can be frozen in one session.");
         Dictionary result = edit(command);
-        if (bool(result.get("ok", false))) frozen.push_back(command);
+        if (bool(result.get("ok", false))) { if(existing>=0) frozen[existing]=command; else frozen.push_back(command); }
         return result;
     }
     if (action == "clear_freezes") { frozen.clear(); Dictionary result; result["ok"] = true; return result; }
@@ -421,12 +427,15 @@ Dictionary PlayerTools::input(const Dictionary &command) {
         }
         Dictionary result; result["ok"] = true; return result;
     }
-    if (virtual_pad < 0) {
+    int requested_device=int(command.get("device",-1));
+    if(requested_device < -1 || requested_device > 7) return failure("Invalid controller output device.");
+    if (virtual_pad < 0 && requested_device < 0) {
         Array connected = input->get_connected_joypads();
         for (int device = 15; device >= 8; device--) if (!connected.has(device)) { virtual_pad = device; break; }
         if (virtual_pad < 0) return failure("No free virtual gamepad slot.");
         input->joy_connection_changed(virtual_pad, true, "Godot Player Virtual Controller", "");
     }
+    const int output_device=requested_device>=0 ? requested_device : virtual_pad;
     String kind = command.get("kind", "axis");
     if (release || kind == "axis") {
         int first = release ? 0 : int(command.get("axis", 0)), last = release ? 5 : first;
@@ -439,7 +448,7 @@ Dictionary PlayerTools::input(const Dictionary &command) {
 #else
             event.instance(); event->set_axis(axis >= 4 ? axis + 2 : axis);
 #endif
-            event->set_device(virtual_pad); event->set_axis_value(value); input->parse_input_event(event);
+            event->set_device(output_device); event->set_axis_value(value); input->parse_input_event(event);
         }
     }
     if (release || kind == "button") {
@@ -454,7 +463,7 @@ Dictionary PlayerTools::input(const Dictionary &command) {
             static const int mapping[] = {0, 1, 2, 3, 4, 5, 10, 11, 8, 9, 12, 13, 14, 15};
             event.instance(); event->set_button_index(mapping[button]);
 #endif
-            event->set_device(virtual_pad); event->set_pressed(!release && bool(command.get("pressed", false))); input->parse_input_event(event);
+            event->set_device(output_device); event->set_pressed(!release && bool(command.get("pressed", false))); input->parse_input_event(event);
         }
     }
     Dictionary result; result["ok"] = true; return result;

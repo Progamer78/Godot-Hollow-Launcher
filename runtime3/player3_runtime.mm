@@ -6,10 +6,12 @@
 #include "core/os/keyboard.h"
 #include "core/os/input_event.h"
 #include "core/project_settings.h"
+#include "core/script_language.h"
 #include "modules/player_tools/player_tools.h"
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <atomic>
 #import <QuartzCore/QuartzCore.h>
 
 @interface GP3AppDelegate (PlayerCreation)
@@ -22,6 +24,14 @@ NSString *gp3_save_path;
 bool gp3_main_started = false;
 static bool ready = false;
 static bool attempted = false;
+static std::atomic<bool> controller_override(false);
+bool gp3_should_filter_controller() { return controller_override.load(); }
+static BOOL configure_script_key(NSData *data) {
+    if(attempted || (data && data.length!=32)) return NO;
+    std::memset(script_encryption_key,0,32);
+    if(data) std::memcpy(script_encryption_key,data.bytes,32);
+    return YES;
+}
 static bool mouse_enabled = false;
 static BOOL requested_mouse = NO;
 static bool previous_mouse = false, previous_touch = false;
@@ -33,6 +43,19 @@ static CFTimeInterval last_motion = 0, last_click = 0;
 static Vector2 last_click_point;
 
 static InputDefault *input() { return static_cast<InputDefault *>(Input::get_singleton()); }
+static void configure_controller(BOOL enabled) {
+    if(controller_override.load()==bool(enabled)) return;
+    if(enabled) controller_override.store(true);
+    if(input()) {
+        Array pads=input()->get_connected_joypads();
+        for(int i=0;i<pads.size();i++) {
+            int device=pads[i];
+            for(int button=0;button<32;button++) input()->joy_button(device,button,false);
+            for(int axis=0;axis<8;axis++) input()->joy_axis(device,axis,0);
+        }
+    }
+    controller_override.store(enabled);
+}
 static bool hold(NSMutableDictionary *holds, id key, BOOL pressed) {
     NSInteger count = [holds[key] integerValue];
     if (pressed) { holds[key] = @(count + 1); return count == 0; }
@@ -214,6 +237,6 @@ static NSString *tools_request(NSString *json) {
     return [NSString stringWithUTF8String:response.utf8().get_data()];
 }
 extern "C" __attribute__((visibility("default"))) const GP3API *GP3GetAPI() {
-    static const GP3API api = {2, start, key, release_inputs, set_mouse_enabled, move_mouse, mouse_position, mouse_button, scroll, captured, visible, aspect_ratio, tools_request};
+    static const GP3API api = {3, start, key, release_inputs, set_mouse_enabled, move_mouse, mouse_position, mouse_button, scroll, captured, visible, aspect_ratio, tools_request, configure_script_key, configure_controller};
     return &api;
 }

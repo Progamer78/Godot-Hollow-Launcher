@@ -64,6 +64,10 @@ struct GameScreen: View {
     @State private var originalVisibility = true
     @State private var selected: ControlButton?
     @State private var editingJoystick = false
+    @State private var editingStickID: UUID?
+    @State private var showingController = false
+    @State private var showingGestures = false
+    @StateObject private var controllerInput = ControllerInput()
     @State private var showingTools = false
     @State private var controlArea = CGSize.zero
     @State private var needsInitialLayout: Bool
@@ -89,23 +93,23 @@ struct GameScreen: View {
     }
 
     private var mouseActive: Bool {
-        launchReady && phase == .active && profile.mouseEnabled && !editing && !showingKeyboard && !showingTools
+        launchReady && phase == .active && (profile.mouseEnabled || profile.controller?.mouseEnabled == true) && !editing && !showingKeyboard && !showingTools && !showingController && !showingGestures
     }
 
-    private func syncMouseMode() { PlayerRuntime.setMouseEnabled(mouseActive) }
+    private func syncMouseMode() { controllerInput.stop(); PlayerRuntime.setMouseEnabled(mouseActive) }
 
     var body: some View {
         ZStack {
             EngineView(controller: session.controller, ratio: session.aspectRatio, orientation: session.game.displayOrientation, inset: session.game.displayInset ?? 0)
                 .ignoresSafeArea()
-                .allowsHitTesting(!editing && !mouseActive)
+                .allowsHitTesting(!editing && !(mouseActive && profile.mouseEnabled))
             if mouseActive {
-                MouseSurface(mode: profile.mouseMode, sensitivity: profile.mouseSensitivity).ignoresSafeArea()
+                MouseSurface(mode: profile.mouseMode, sensitivity: profile.mouseSensitivity, gestures: profile.gestures ?? TouchGestures()).ignoresSafeArea().allowsHitTesting(profile.mouseEnabled)
             }
             if editing { Color.black.opacity(0.18).ignoresSafeArea() }
             GeometryReader { area in
                 ZStack {
-                    if let stick = profile.joystick, showButtons || editing { joystick(stick, in: area.size) }
+                    if showButtons || editing { ForEach(profile.sticks) { stick in joystick(stick, in: area.size) } }
                     if showButtons || editing {
                         ForEach(profile.buttons) { button in
                             control(button, in: area.size)
@@ -131,8 +135,29 @@ struct GameScreen: View {
         .ignoresSafeArea(.keyboard)
         .onChange(of: showingKeyboard) { _ in syncMouseMode() }
         .onChange(of: launchReady) { _ in syncMouseMode() }
+        .onChange(of: showingController) { _ in syncMouseMode() }
+        .onChange(of: showingTools) { _ in syncMouseMode() }
+        .onChange(of: editing) { _ in syncMouseMode() }
+        .onChange(of: showingGestures) { _ in syncMouseMode() }
+        .onChange(of: menuOpen) { if $0 { controllerInput.stop() } }
+        .sheet(isPresented:$showingGestures) {
+            GestureEditor(value:profile.gestures ?? TouchGestures(),onSave:{ value in
+                profile.gestures=value
+                _ = library.saveControls(profile,visible:showButtons,for:session.id)
+            })
+        }
+        .sheet(isPresented:$showingController,onDismiss:{
+            profile=(library.games.first { $0.id == session.id } ?? session.game).controls
+            GameInput.release(); GameInput.outputDevice=profile.controller?.enabled == true ? 0 : nil; PlayerRuntime.configureController(profile.controller?.enabled == true); syncMouseMode()
+        }) {
+            ControllerEditor(profile:profile.controller ?? ControllerProfile(),onSave:{ updated in
+                var value=profile; value.controller=updated
+                _ = library.saveControls(value,visible:showButtons,for:session.id)
+            })
+        }
         .onReceive(heartbeat) { now in
             guard phase == .active else { return }
+            controllerInput.configure(profile.controller,active:launchReady && !editing && !menuOpen && !showingTools && !showingKeyboard && !showingController && !showingGestures,view:session.controller.view)
             if launchReady { _ = ToolsBridge.send(["action": "tick"]) }
             if now.timeIntervalSince(lastTick) >= 1 {
                 lastTick = now
@@ -154,19 +179,24 @@ struct GameScreen: View {
             }, onCancel: { selected = nil })
         }
         .sheet(isPresented: $editingJoystick) {
-                JoystickEditor(joystick: profile.joystick ?? JoystickControl(), onSave: { updated in
-                    profile.joystick = updated
+                JoystickEditor(joystick: profile.sticks.first { $0.id == editingStickID } ?? JoystickControl(), onSave: { updated in
+                    if profile.joystick?.id == updated.id { profile.joystick = updated }
+                    else if let index=profile.additionalJoysticks?.firstIndex(where: { $0.id == updated.id }) { profile.additionalJoysticks?[index]=updated }
                     if updated.mode == "floating" { profile.mouseEnabled = false }
                     editingJoystick = false
-                }, onDelete: { profile.joystick = nil; editingJoystick = false }, onCancel: { editingJoystick = false })
+                }, onDelete: {
+                    if profile.joystick?.id == editingStickID { profile.joystick=nil }
+                    profile.additionalJoysticks?.removeAll { $0.id == editingStickID }; editingJoystick=false
+                }, onCancel: { editingJoystick = false })
         }
         .sheet(isPresented: $showingTools, onDismiss: {
             syncMouseMode()
         }) { GameTools(gameID: session.id) }
-        .onAppear { syncMouseMode() }
-        .onDisappear { GameInput.release(); PlayerRuntime.setMouseEnabled(false) }
+        .onAppear { GameInput.outputDevice=profile.controller?.enabled == true ? 0 : nil; syncMouseMode() }
+        .onDisappear { controllerInput.stop(); GameInput.release(); PlayerRuntime.setMouseEnabled(false) }
         .onChange(of: phase) { value in
             if value != .active {
+                controllerInput.stop()
                 showingKeyboard = false
                 PlayerRuntime.setMouseEnabled(false)
                 GameInput.release()
@@ -198,9 +228,16 @@ struct GameScreen: View {
                     }
                 }
                 HStack(spacing: 14) {
-                    Button(profile.joystick == nil ? "Add Joystick" : "Edit Joystick") {
+                    Button("Add Joystick") {
+                        guard profile.sticks.count < 4 else { return }
+                        var stick=JoystickControl(); stick.identifier=UUID()
+                        stick.x=profile.sticks.isEmpty ? 0.2 : 0.8
+                        stick.zone=profile.sticks.isEmpty ? "left" : "right"
+                        stick.axis=profile.sticks.isEmpty ? 0 : 2
+                        if profile.joystick == nil { profile.joystick=stick } else { profile.additionalJoysticks=(profile.additionalJoysticks ?? [])+[stick] }
+                        editingStickID=stick.id
                         editingJoystick = true
-                    }
+                    }.disabled(profile.sticks.count >= 4)
                     Button("Reset Buttons") { resetButtons() }
                 }
             } else {
@@ -233,7 +270,11 @@ struct GameScreen: View {
                     originalVisibility = showButtons
                     editing = true
                 }
-                Button("Keyboard") { GameInput.release(); PlayerRuntime.setMouseEnabled(false); menuOpen = false; showingKeyboard = true }.disabled(!launchReady)
+                Group {
+                    Button("Keyboard") { GameInput.release(); PlayerRuntime.setMouseEnabled(false); menuOpen = false; showingKeyboard = true }.disabled(!launchReady)
+                    Button("Controller Bindings") { controllerInput.stop(); GameInput.release(); PlayerRuntime.configureController(true); menuOpen=false; showingController=true }
+                    Button("Touch Gestures") { controllerInput.stop(); GameInput.release(); menuOpen=false; showingGestures=true }
+                }
                 Button(debuggingInput ? "Hide Input Monitor" : "Show Input Monitor") { debuggingInput.toggle(); menuOpen = false }
                 Button("Release All Inputs") { GameInput.release() }
                 Button {
@@ -285,9 +326,10 @@ struct GameScreen: View {
             EditableControl(button: ControlButton(label: "Joystick", key: stick.mode == "floating" ? "Floating" : "Fixed",
                                                   x: stick.x, y: stick.y, width: stick.diameter, height: stick.diameter),
                             center: joystickPoint(stick, in: size), area: size,
-                            onSelect: { editingJoystick = true }, onMove: { point in
-                profile.joystick?.x = Double(point.x / max(1, size.width))
-                profile.joystick?.y = Double(point.y / max(1, size.height))
+                            onSelect: { editingStickID=stick.id; editingJoystick = true }, onMove: { point in
+                let x=Double(point.x / max(1,size.width)), y=Double(point.y / max(1,size.height))
+                if profile.joystick?.id == stick.id { profile.joystick?.x=x; profile.joystick?.y=y }
+                else if let index=profile.additionalJoysticks?.firstIndex(where:{$0.id == stick.id}) { profile.additionalJoysticks?[index].x=x; profile.additionalJoysticks?[index].y=y }
             })
         } else if stick.mode == "floating" {
             JoystickSurface(configuration: stick).frame(width: size.width, height: size.height)
@@ -430,6 +472,7 @@ private struct ControlButtonEditor: View {
                 Picker("Input", selection: $button.key) {
                     ForEach(ControlKeys.all.contains(button.key) ? ControlKeys.all : [button.key] + ControlKeys.all, id: \.self) { key in Text(key).tag(key) }
                 }
+                TextField("Custom key name",text:$button.key).autocapitalization(.none).disableAutocorrection(true)
                 Picker("Behavior", selection: Binding(get: { button.behavior ?? "hold" }, set: { button.behavior = $0 == "hold" ? nil : $0 })) {
                     Text("Hold while touched").tag("hold"); Text("Tap to toggle").tag("toggle"); Text("Repeat while touched").tag("repeat")
                 }

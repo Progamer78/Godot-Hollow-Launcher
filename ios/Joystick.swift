@@ -13,6 +13,11 @@ struct JoystickEditor: View {
                     Text("Fixed").tag("fixed")
                     Text("Floating").tag("floating")
                 }.pickerStyle(SegmentedPickerStyle())
+                if joystick.mode == "floating" {
+                    Picker("Touch region",selection:Binding(get:{ joystick.zone ?? "full" },set:{ joystick.zone=$0 })) {
+                        Text("Whole screen").tag("full"); Text("Left half").tag("left"); Text("Right half").tag("right")
+                    }
+                }
                 Text(joystick.mode == "floating" ? "The stick appears where you touch and follows your drag. Other control buttons stay available. Floating mode uses screen drags, so mouse mode is off." : "Drag the joystick in the control editor to choose its position.")
                     .font(.caption).foregroundColor(.secondary)
                 Section(header: Text("Direction inputs")) {
@@ -47,7 +52,10 @@ struct JoystickEditor: View {
         }.navigationViewStyle(StackNavigationViewStyle())
     }
     private func keyPicker(_ title: String, key: Binding<String>) -> some View {
-        Picker(title, selection: key) { ForEach(ControlKeys.all, id: \.self) { Text($0).tag($0) } }
+        VStack(alignment:.leading) {
+            Picker(title, selection: key) { ForEach(ControlKeys.all.contains(key.wrappedValue) ? ControlKeys.all : [key.wrappedValue]+ControlKeys.all, id: \.self) { Text($0).tag($0) } }
+            TextField("Custom key for \(title.lowercased())",text:key).autocapitalization(.none).disableAutocorrection(true)
+        }
     }
 }
 
@@ -96,7 +104,11 @@ final class JoystickTouchView: UIView {
         if activeTouch == nil { drawStick(offset: .zero) }
     }
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        if configuration.mode == "floating" { return bounds.contains(point) }
+        if configuration.mode == "floating" {
+            if configuration.zone == "left" && point.x > bounds.midX { return false }
+            if configuration.zone == "right" && point.x < bounds.midX { return false }
+            return bounds.contains(point)
+        }
         return hypot(point.x - bounds.midX, point.y - bounds.midY) <= CGFloat(configuration.diameter / 2)
     }
     private func drawStick(offset: CGPoint) {
@@ -117,21 +129,21 @@ final class JoystickTouchView: UIView {
         if configuration.output == "gamepad" {
             analogActive = true
             let axes = configuration.analog(dx: Double(dx / radius), dy: Double(dy / radius))
-            GameInput.axis(configuration.axis ?? 0, value: axes.0)
-            GameInput.axis((configuration.axis ?? 0) + 1, value: axes.1)
+            GameInput.axis(configuration.axis ?? 0, value: axes.0, source: configuration.id.uuidString)
+            GameInput.axis((configuration.axis ?? 0) + 1, value: axes.1, source: configuration.id.uuidString)
         }
-        for key in held.subtracting(next) { GameInput.key(key, pressed: false) }
-        for key in next.subtracting(held) { GameInput.key(key, pressed: true) }
+        for key in GameInput.ordered(held.subtracting(next)).reversed() { GameInput.key(key, pressed: false) }
+        for key in GameInput.ordered(next.subtracting(held)) { GameInput.key(key, pressed: true) }
         held = next
         drawStick(offset: CGPoint(x: dx * scale, y: dy * scale))
     }
     @objc func cancelTouch() {
         if analogActive {
-            GameInput.axis(configuration.axis ?? 0, value: 0)
-            GameInput.axis((configuration.axis ?? 0) + 1, value: 0)
+            GameInput.axis(configuration.axis ?? 0, value: 0, source: configuration.id.uuidString)
+            GameInput.axis((configuration.axis ?? 0) + 1, value: 0, source: configuration.id.uuidString)
         }
         analogActive = false
-        for key in held { GameInput.key(key, pressed: false) }
+        for key in GameInput.ordered(held).reversed() { GameInput.key(key, pressed: false) }
         held.removeAll(); activeTouch = nil
         drawStick(offset: .zero)
     }

@@ -12,6 +12,7 @@ enum PlayerRuntime {
     static func setKey(_ key: String, pressed: Bool) { keyEvents.append((key, pressed)) }
     static func releaseKeys() {}
     static func setMouseButton(_ button: Int, pressed: Bool) {}
+    static func scrollMouse(_ direction: Int) {}
     static func mouseCaptured() -> Bool { false }
     static func mouseCursorRevision() -> UInt { cursorPolls += 1; return 1 }
     static func mouseCursorImage() -> UIImage? { nil }
@@ -77,6 +78,15 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
         check(ToolsBridge.textChunks.joined() == pasted && ToolsBridge.textChunks.allSatisfy { $0.unicodeScalars.count <= 512 }, "Paste must preserve characters across bounded native requests")
         GameInput.key("Space", pressed: true); GameInput.axis(0, value: 0.7); GameInput.release()
         check(GameInput.debugKeys.isEmpty && GameInput.axes.isEmpty, "Focus cancellation clears input state")
+        GameInput.axis(0,value:0.4,source:"left"); GameInput.axis(0,value:0.2,source:"right")
+        check(abs((GameInput.axes[0] ?? 0)-0.6)<0.001,"Concurrent input sources combine axis state")
+        GameInput.axis(0,value:0,source:"left")
+        check(GameInput.axes[0] == 0.2,"Releasing one stick does not cancel another")
+        GameInput.release()
+        GameInput.outputDevice=0
+        GameInput.key("Pad A",pressed:true); GameInput.release()
+        check(ToolsBridge.commands.contains { ($0["device"] as? Int) == 0 && ($0["kind"] as? String) == "button" && ($0["pressed"] as? Bool) == false },"Controller profile release reaches player-one output")
+        GameInput.outputDevice=nil
         print("PLAYER_INPUT_UI_CHECK: joystick, keyboard, Unicode and release PASS")
         let mouse = MouseTouchView(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
         root.addSubview(mouse)
