@@ -151,14 +151,21 @@ struct ControlProfile: Codable, Equatable {
     }
 
     mutating func constrain() {
-        var identities = Set<UUID>()
-        buttons = Array(buttons.filter { identities.insert($0.id).inserted }.prefix(32))
+        var buttonIDs = Set<UUID>()
+        buttons = Array(buttons.filter { buttonIDs.insert($0.id).inserted }.prefix(32))
         for index in buttons.indices { buttons[index].constrain() }
         mouseSensitivity = mouseSensitivity.isFinite ? min(3, max(0.25, mouseSensitivity)) : 1
         if !["trackpad", "direct"].contains(mouseMode) { mouseMode = "trackpad" }
         joystick?.constrain()
-        var identities=Set<UUID>(); if let first=joystick { identities.insert(first.id) }
-        additionalJoysticks=additionalJoysticks.map { Array($0.filter { identities.insert($0.id).inserted }.prefix(3)).map { value in var stick=value; stick.constrain(); return stick } }
+        var stickIDs = Set<UUID>()
+        if let first = joystick { stickIDs.insert(first.id) }
+        additionalJoysticks = additionalJoysticks.map { values in
+            Array(values.filter { stickIDs.insert($0.id).inserted }.prefix(3)).map { value in
+                var stick = value
+                stick.constrain()
+                return stick
+            }
+        }
         if sticks.contains(where: { $0.mode == "floating" }) { mouseEnabled = false }
         controller?.constrain()
         gestures?.constrain()

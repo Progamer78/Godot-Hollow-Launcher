@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-08",
+  "failure": {
+    "log": "Errors/export-and-build/14_Test native pack inspector.txt",
+    "file": "ios/ControlProfile.swift",
+    "line": 160,
+    "error": "invalid redeclaration of 'identities'",
+    "stage": "Swift model compilation"
+  },
+  "verified_by_supplied_actions_log": {
+    "pack_inspector_checks_passed": 270,
+    "original_packs_accepted": 3,
+    "objc_lifetime_audit": "passed",
+    "macos_archive_commoncrypto_bridge": "compiled"
+  },
+  "changes": [
+    "Separate buttonIDs and stickIDs locals",
+    "Independent control-kind deduplication regression with shared IDs"
+  ],
+  "verified_locally": {
+    "python_native_helper_tests_passed": 23,
+    "skipped": 0,
+    "swift_syntax_files": 24,
+    "swift_syntax_errors": 0,
+    "direct_local_redeclaration_scan": "passed (not type-checking)"
+  },
+  "not_verified": [
+    "Repaired Swift model suite execution",
+    "Full iOS compiler/build",
+    "IPA/device behavior"
+  ],
+  "ipa_produced": false,
+  "sha256": {
+    "ios/ControlProfile.swift": "6542c28ebff38cf88f3af02616e0f5e66e1c46a6495877ee7e6a75da15040711",
+    "tests/models/main.swift": "e5c2343918d523dd7a72f98a67b8a30e2ba014df22e954482517fe88c4b2ebf1",
+    "README.md": "da7135ebf351f05038cf74b59c9d909d6d3d9ca3bc2184703a2aba9692c166ce",
+    "tests/results/validation.md": "238bff4838a11d35b3c2d775cc35dcf8dce55d078e81f3a3ad75145122585c08"
+  }
+}

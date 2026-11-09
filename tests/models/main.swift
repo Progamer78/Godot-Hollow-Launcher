@@ -239,6 +239,13 @@ do {
     let decoded=try JSONDecoder().decode(ControlProfile.self,from:JSONEncoder().encode(controls))
     require(decoded == controls && decoded.sticks.count == 2 && decoded.sticks[0].up == "F13","Multiple stick identities, custom keys, controller mappings and gestures must persist")
     require(decoded.controller?.mouseEnabled == true && decoded.controller?.target("A") == "Mouse Left","Controller stick mouse and click mappings persist")
+    var duplicateControls = decoded
+    duplicateControls.buttons[0].id = first.id
+    duplicateControls.buttons.append(duplicateControls.buttons[0])
+    duplicateControls.additionalJoysticks = [first, second, second]
+    duplicateControls.constrain()
+    require(duplicateControls.buttons.count == decoded.buttons.count && duplicateControls.sticks.map(\.id) == [first.id, second.id], "Button and stick IDs must be deduplicated independently, retaining distinct control kinds sharing an ID")
+    require(duplicateControls.buttons[0].id == duplicateControls.sticks[0].id, "A button ID must not remove a joystick with the same ID")
     let neutral=decoded.controller!.stick(0.01,0)
     let moving=decoded.controller!.stick(0.7,0)
     require(neutral.0 == 0 && moving.0 > 0 && moving.0 < 1,"Physical controller deadzone retains analog strength")

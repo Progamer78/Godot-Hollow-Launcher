@@ -1,5 +1,13 @@
 # Validation recorded November 8, 2026
 
+## Control profile compile repair - November 8
+
+The latest supplied Actions run passed all 270 pack-inspector checks, accepted the three original proof PCKs, passed the Objective-C lifetime audit, and compiled the actual macOS archive/CommonCrypto bridge. Model compilation then failed at ios/ControlProfile.swift:160 because constrain() declared identities twice in the same scope: once for buttons and once for joysticks.
+
+The two sets are now buttonIDs and stickIDs. Their deduplication remains independent; sharing an ID across control kinds must not drop either control. The new model regression includes that shared-ID case plus duplicate button/joystick removal. No engine or build-pipeline rewrite was needed.
+
+All 23 Python/native helper tests pass without skips. All 24 Swift source/test files parse, and an additional AST scan finds no repeated direct local variable declarations within the same statement block. Neither parsing nor that narrow scan is a Swift compiler/type checker. The new model case, final launcher/engine iOS compilation and device behavior still need Actions/macOS verification. No new IPA was produced locally. Earlier desktop engine results remain unchanged.
+
 ## EXE encryption diagnostic/test repair - November 8
 
 The supplied Actions run stopped in Test native pack inspector at tests/pck/main.swift:103, before model compilation, launcher type-checking or engine builds. The old assertion required the phrase "export encryption key", which the EXE-import update had removed from the diagnostic. This was a test/diagnostic mismatch, not evidence of a game/runtime failure.
