@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-08",
+  "failure": {
+    "log": "Errors/export-and-build/14_Test native pack inspector.txt",
+    "step": "Test native pack inspector",
+    "exit_code": 133,
+    "assertion": "Encryption errors must describe the actual pack blocker",
+    "cause": "Stale diagnostic wording assertion after EXE-assisted key recovery was added"
+  },
+  "changes": [
+    "Separate Godot 3 recovery and unsupported Godot 4 encryption diagnostics",
+    "Godot 3 fixture and actionable EXE/PCK error assertions",
+    "Inspector decryption callback, per-script count/version, unsupported bytecode and engine-family regression cases"
+  ],
+  "verified": {
+    "python_native_helpers_passed": 23,
+    "skipped": 0,
+    "swift_syntax_files": 24,
+    "swift_syntax_errors": 0
+  },
+  "not_verified": [
+    "Swift regression execution",
+    "Apple SDK type-checking and full iOS compilation",
+    "IPA and device behavior"
+  ],
+  "ipa_produced": false,
+  "sha256": {
+    "ios/PCKInspector.swift": "85b8071212db407b8bf586c93594c266d574a5bc7a9b70dc2fb5766b1a5dd366",
+    "tests/pck/main.swift": "5a55cb3f7a5b4f6829801950d204a9935ef55252ea2429d9eea14e2d7e7aded2",
+    "README.md": "3a9904b566039aea31113c25ed09cad4443fe3a4628cd4263f5633b2c2fac000",
+    "tests/results/validation.md": "6c4ab79f67f23f754c60f982d5e23cd103eec352c9f1c3299d7532f2699eef5b"
+  }
+}

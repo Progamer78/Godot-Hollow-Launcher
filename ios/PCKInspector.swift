@@ -97,7 +97,10 @@ enum PCKInspector {
         }
         guard hasProject else { throw PackError.invalid("No project settings found. This is a resource-only or incomplete pack.") }
         if encryptedScripts > 0 && (decryptScript == nil || major != 3) {
-            throw PackError.invalid("This Godot \(major) pack contains \(encryptedScripts) encrypted scripts, including \(encryptedExample). Select its original Godot 3 Windows x64 EXE together with the PCK to try automatic key recovery. Other encryption layouts require an unencrypted export.")
+            let recovery = major == 3
+                ? "Select its original Godot 3 Windows x64 EXE together with the PCK to try automatic export encryption key recovery. Other encryption layouts require an unencrypted export."
+                : "This engine's export encryption key recovery is unsupported. Import an unencrypted export."
+            throw PackError.invalid("This Godot \(major) pack contains \(encryptedScripts) encrypted scripts, including \(encryptedExample). \(recovery)")
         }
         var versions = Set<UInt32>()
         for (offset, length, path) in encryptedEntries {

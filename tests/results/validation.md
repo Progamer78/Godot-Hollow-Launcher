@@ -1,5 +1,13 @@
 # Validation recorded November 8, 2026
 
+## EXE encryption diagnostic/test repair - November 8
+
+The supplied Actions run stopped in Test native pack inspector at tests/pck/main.swift:103, before model compilation, launcher type-checking or engine builds. The old assertion required the phrase "export encryption key", which the EXE-import update had removed from the diagnostic. This was a test/diagnostic mismatch, not evidence of a game/runtime failure.
+
+The diagnostic now describes Godot 3 EXE/PCK key recovery and gives a separate unsupported-encryption message for Godot 4. The encryption diagnostic fixture uses Godot 3 and asserts the script count, representative path and recovery action. Additional Swift cases exercise the injected decrypter on every encrypted script, recorded version/count, rejection of versions 14/100, and refusal to call the Godot 3 decrypter for Godot 4. The real cryptographic test remains in the model suite.
+
+All 23 Python/native helper tests pass without skips; all 24 Swift files parse. These helper tests do not execute Swift. No usable local Swift/Xcode compiler is available (the registered WSL distributions have missing virtual disks), so execution of the repaired Swift suite, Apple SDK compilation and IPA generation remain unverified. The earlier 73 checks per desktop engine are unchanged historical results; engine code did not change in this repair. No new IPA was produced locally.
+
 ## EXE import, controller profiles and multitouch update - November 8
 
 Implemented EXE/PCK pairing, bounded generic Windows x64 PE key discovery, CommonCrypto GDEC validation, private per-game key storage and a version-3 Godot 3 bridge that sets the key before startup. No key bytes are included in source, logs or portable save/layout exports. The production C++ scanner compiled on Windows and found one candidate in the supplied Coffee EXE, matching the exact candidate previously verified against all 96 encrypted scripts. This does not establish Coffee gameplay or the Apple key handoff.

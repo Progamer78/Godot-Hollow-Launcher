@@ -56,7 +56,7 @@ try check(fixture(path: "game.gdextension"), valid: false, "native resource-only
 try check(fixture(path: "project.binary"), valid: false, "invalid binary settings signature")
 let optionalNative = fixture(extraPaths: ["addons/webrtc_native/webrtc_native.gdextension", "addons/webrtc_native/lib/windows.dll"])
 try check(optionalNative, valid: true, "Complete project with possibly optional native components")
-try check(fixture(extraPaths: ["scripts/game.gde"]), valid: false, "Encrypted scripts remain unsupported")
+try check(fixture(extraPaths: ["scripts/game.gde"]), valid: false, "Encrypted scripts require a supported engine and validated key")
 try check(fixture(extraPaths: ["scripts/game.cs"]), valid: false, ".NET scripts remain unsupported")
 let nativeURL = dir.appendingPathComponent("native.pck")
 try optionalNative.write(to: nativeURL)
@@ -94,15 +94,42 @@ try compiledFixture(version: 100).write(to: legacyCompiledURL)
 let legacyCompiledInfo = try PCKInspector.inspect(legacyCompiledURL)
 precondition(legacyCompiledInfo.scriptVersions == [100], "Bytecode versions must be recorded independently of engine metadata")
 let encryptedURL = dir.appendingPathComponent("encrypted.pck")
-try fixture(extraPaths: ["addons/example.gde", "game/Main.gde"]).write(to: encryptedURL)
+try fixture(format: 1, extraPaths: ["addons/example.gde", "game/Main.gde"]).write(to: encryptedURL)
 do {
     _ = try PCKInspector.inspect(encryptedURL)
     fatalError("Encrypted scripts cannot be accepted without an export key")
 } catch {
     let reason = error.localizedDescription
-    precondition(reason.contains("2 encrypted scripts") && reason.contains("export encryption key") && reason.contains("game/Main.gde"), "Encryption errors must describe the actual pack blocker")
+    precondition(reason.contains("2 encrypted scripts") && reason.contains("export encryption key") && reason.contains("game/Main.gde") && reason.contains("EXE together with the PCK"), "Godot 3 encryption errors must identify the scripts and original EXE/PCK recovery action")
 }
 checks += 2
+var decryptCalls = 0
+let recovered = try PCKInspector.inspect(encryptedURL, decryptScript: { _ in
+    decryptCalls += 1
+    // Test only the inspector/decrypter contract. The model suite separately
+    // exercises actual AES and key discovery with an encrypted fixture.
+    return Data("GDSC".utf8) + u32(13) + u32(0)
+})
+precondition(decryptCalls == 2 && recovered.encryptedScriptCount == 2 && recovered.scriptVersions == [13], "Every encrypted script must be validated and its bytecode recorded")
+checks += 1
+for version: UInt32 in [14, 100] {
+    do {
+        _ = try PCKInspector.inspect(encryptedURL, decryptScript: { _ in Data("GDSC".utf8) + u32(version) + u32(0) })
+        fatalError("Unsupported decrypted bytecode accepted")
+    } catch { precondition(error.localizedDescription.contains("newer Godot 3 bytecode reader")) }
+    checks += 1
+}
+try fixture(extraPaths: ["game/Main.gde"]).write(to: encryptedURL)
+do {
+    _ = try PCKInspector.inspect(encryptedURL, decryptScript: { _ in
+        fatalError("Godot 4 encryption must not use the Godot 3 decrypter")
+    })
+    fatalError("Unsupported Godot 4 encrypted scripts accepted")
+} catch {
+    let reason = error.localizedDescription
+    precondition(reason.contains("Godot 4") && reason.contains("unencrypted export") && !reason.contains("EXE together with the PCK"), "Unsupported encryption must not suggest Godot 3 EXE recovery")
+}
+checks += 1
 let good = fixture()
 for length in 0..<good.count { try check(good.prefix(length), valid: false, "truncated \(length)") }
 for file in CommandLine.arguments.dropFirst() {
