@@ -459,7 +459,8 @@ do {
     state.scope = "456"
     require(state.needsNewSearch, "A scope change explicitly searches the selected scene again")
     state.scope = ""
-    var empty = numericPool; empty.candidateCount = 0; empty.rows = []; empty.searchTypes = []
+    var empty = ToolReply(ok: true, message: nil, rows: [], truncated: false, visited: nil, undoCount: nil)
+    empty.searchStarted = true; empty.candidateCount = 0; empty.searchTypes = []
     state.receive(empty)
     require(state.needsNewSearch, "An empty result offers a fresh search rather than narrowing an empty set forever")
     var flags = mixed; flags.searchTypes = ["bool"]; flags.candidateCount = 200003
