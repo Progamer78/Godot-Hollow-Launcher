@@ -166,7 +166,7 @@ private struct SaveTextEditor: View {
     }
     private func formatJSON() {
         do { text = try SaveTextFormat.json(text); message = "Formatted for reading. Tap Save to keep these changes." }
-        catch { error = "This file isn't valid JSON yet. Check quotes, commas and brackets." }
+        catch { self.error = "This file isn't valid JSON yet. Check quotes, commas and brackets." }
     }
     private func save() {
         guard !saving else { return }
