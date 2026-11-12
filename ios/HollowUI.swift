@@ -155,21 +155,6 @@ struct HollowPerformanceHUD: View {
     }
 }
 
-struct HollowPinnedHUD: View {
-    let rows: [PinnedReadout]
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(rows) { row in
-                HStack(alignment: .top, spacing: 5) {
-                    if row.frozen { Image(systemName: "snowflake").foregroundColor(.cyan).accessibilityLabel("Frozen") }
-                    Text("\(row.name): \(row.value)").font(.system(.caption, design: .monospaced)).lineLimit(2)
-                }
-            }
-        }.padding(10).frame(maxWidth: 240, alignment: .leading).foregroundColor(.white)
-            .background(Color.black.opacity(0.75)).cornerRadius(12).accessibilityElement(children: .combine)
-    }
-}
-
 private struct HollowNotices: View {
     private let notices = [("Godot Engine", "GodotEngineNotices"), ("Spine Runtimes", "SpineRuntimeNotices"), ("LimboAI", "LimboAIRuntimeNotices")]
     var body: some View {

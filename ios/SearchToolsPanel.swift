@@ -59,15 +59,15 @@ struct SearchToolsPanel: View {
                     Label("Incomplete scan: a safety budget or path depth was reached. Use a scene scope or a more specific filter and start a new search.", systemImage: "exclamationmark.triangle").font(.caption).foregroundColor(.orange)
                 }
             }
-            if state.hasSearch {
-                Section(header: Text("\(state.candidateCount) candidates")) {
+            if state.hasSearch || state.searching && !state.rows.isEmpty {
+                Section(header: Text(state.discovering ? "\(state.candidateCount) matches so far" : "\(state.candidateCount) candidates")) {
                     pagination
                     ForEach(state.rows) { stat in
                         Button { onEdit(stat) } label: {
                             ToolStatRow(stat: stat, frozen: frozen.contains { $0.id == stat.id })
-                        }.disabled(!canEdit || state.searching)
+                        }.disabled(!canEdit || state.searching && !state.discovering)
                     }
-                    if state.rows.isEmpty { Text(state.candidateCount == 0 ? "No candidates match. Undo the last narrow or start a new search." : "These candidates are no longer available in this scene.").foregroundColor(.secondary) }
+                    if state.rows.isEmpty { Text(state.searching ? "Still scanning. Matches will appear here as they are found." : (state.candidateCount == 0 ? "No candidates match. Undo the last narrow or start a new search." : "These candidates are no longer available in this scene.")).foregroundColor(.secondary) }
                     if state.staleCount > 0 { Text("\(state.staleCount) unavailable candidates on this page. Narrow removes stale references.").font(.caption).foregroundColor(.secondary) }
                     if state.pageCount > 1 { pagination }
                 }

@@ -5,6 +5,7 @@ from pathlib import Path
 import platform
 import plistlib
 import re
+import shutil
 import subprocess
 import time
 
@@ -67,7 +68,7 @@ def run(output):
         "CFBundleSupportedPlatforms": ["iPhoneSimulator"],
         "UILaunchScreen": {}, "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
     }))
-    files = ["ios/ControllerProfile.swift", "ios/ControllerInput.swift", "ios/ControlProfile.swift", "ios/GameInput.swift", "ios/InputViews.swift", "ios/KeyboardInput.swift", "ios/Joystick.swift", "tests/input-ui/LifetimeAudit.swift", "tests/input-ui/main.swift"]
+    files = ["ios/ToolModels.swift", "ios/PinnedHUD.swift", "ios/ControllerProfile.swift", "ios/ControllerInput.swift", "ios/ControlProfile.swift", "ios/GameInput.swift", "ios/InputViews.swift", "ios/KeyboardInput.swift", "ios/Joystick.swift", "tests/input-ui/LifetimeAudit.swift", "tests/input-ui/main.swift"]
     subprocess.run(["xcrun", "--sdk", "iphonesimulator", "swiftc", "-swift-version", "5", "-parse-as-library",
                     "-sdk", sdk, "-target", f"{arch}-apple-ios15.0-simulator",
                     *[str(ROOT / file) for file in files], "-o", str(app / "InputSmoke")], check=True, timeout=120)
@@ -102,9 +103,14 @@ def run(output):
             raise
         (output / "launcher.log").write_text(result.stdout + result.stderr)
         result.check_returncode()
-        wait_for_result(container / "Documents/input-ui-result.log", output)
+        try:
+            wait_for_result(container / "Documents/input-ui-result.log", output)
+        finally:
+            for name in ["hud-long-name-first.png", "hud-long-name-second.png"]:
+                screenshot = container / "Documents" / name
+                if screenshot.is_file(): shutil.copyfile(screenshot, output / name)
         (output / "results.json").write_text(json.dumps({"passed": True, "runtime": runtime, "sources": files,
-              "scope": "Actual UIKit controls/keyboard/cursor updates; recorded engine endpoints, no Godot runtime or display-frame timing guarantee"}, indent=2) + "\n")
+              "scope": "Actual UIKit controls/keyboard/cursor updates and rendered SwiftUI long-name pin HUD regression; recorded engine endpoints, no Godot runtime or display-frame timing guarantee"}, indent=2) + "\n")
     except Exception:
         try:
             diagnostic = subprocess.run(["xcrun", "simctl", "spawn", device, "log", "show", "--last", "3m", "--style", "compact", "--predicate", "process == 'InputSmoke'"], capture_output=True, text=True, timeout=20)

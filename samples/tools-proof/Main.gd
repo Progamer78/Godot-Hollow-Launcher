@@ -10,6 +10,7 @@ var tools
 var checks = 0
 var typed_codes = []
 var search_fixture = []
+var search_dictionary = {}
 
 func _input(event):
     if event is InputEventKey and event.pressed:
@@ -265,6 +266,53 @@ func run_checks():
     var wire_narrow = wire_request({"action":"refine_numbers","kind":"bool","comparison":"changed"})
     while wire_narrow.searching: wire_narrow = wire_request({"action":"continue_search"})
     check(wire_narrow.candidateCount == 1, "JSON session supports changed narrowing after read-only refresh")
+    for i in range(200000): search_fixture.append(i)
+    var old_wire = wire_request({"action":"search_results"})
+    var preview = wire_request({"action":"find_numbers","kind":"number","comparison":"any","search":"ToolsProof.money"})
+    check(preview.searching and preview.searchDiscovery and preview.rows.size() == 1 and preview.rows[0].label.ends_with(".money"), "named variable appears in the first batch before unrelated large arrays finish")
+    var progress = wire_request({"action":"continue_search","progressOnly":true})
+    check(progress.searching and not progress.has("rows"), "progress-only batches skip row resolution and JSON payloads")
+    var money_before_preview = money
+    check(wire_request({"action":"edit","target":preview.rows[0],"value":"1231"}).ok and money == 1231, "preview matches can be edited while discovery continues")
+    var still_preview = wire_request({"action":"search_results"})
+    check(still_preview.rows[0].previous == str(money_before_preview) and still_preview.rows[0].value == "1231", "preview reads retain their original comparison baseline")
+    var cancelled_preview = wire_request({"action":"cancel_search"})
+    check(cancelled_preview.candidateCount == old_wire.candidateCount and cancelled_preview.rows[0].label == old_wire.rows[0].label, "cancelling preview restores the previous completed pool")
+    money = money_before_preview
+    var named_timing = benchmark_search({"action":"find_numbers","kind":"number","comparison":"any","search":"ToolsProof.money"}, "named variable with unrelated 200000-entry array")
+    check(named_timing.candidateCount == 1, "fast preview still finishes an exhaustive named search")
+    var full_timing = benchmark_search({"action":"find_numbers","kind":"number","comparison":"any","search":"search_fixture"}, "200000 candidates through JSON transport")
+    check(full_timing.candidateCount == 200000 and full_timing.pageCount == 2000 and not full_timing.truncated, "progress-only transport retains every candidate and all pages")
+    check(full_timing.indexedLocations < 100 and full_timing.indexRecordsBytes < 20000000, "200000 entries share compact path records rather than full per-row dictionaries")
+    var fresh_batch = wire_request({"action":"refine_numbers","kind":"number","comparison":"any"})
+    search_fixture = search_fixture.duplicate()
+    search_fixture[199000] = -3
+    while fresh_batch.searching: fresh_batch = wire_request({"action":"continue_search","progressOnly":true})
+    var late_page = wire_request({"action":"search_results","page":1990})
+    check(late_page.rows[0].label.ends_with("[199000]") and late_page.rows[0].previous == "-3", "container cache expires between batches when the game replaces an array")
+    search_fixture[199000] = -4
+    var narrow_timing = benchmark_search({"action":"refine_numbers","kind":"number","comparison":"decreased"}, "narrow 200000 candidates through JSON transport")
+    check(narrow_timing.candidateCount == 1 and narrow_timing.rows[0].label.ends_with("[199000]"), "optimized narrowing still checks offscreen candidates")
+    search_fixture.clear()
+    var undo_large = wire_request({"action":"undo_search"})
+    check(undo_large.candidateCount == 200000, "large-pool undo restores all indexed candidates")
+    for i in range(300): search_dictionary["entry_" + str(i)] = i
+    search_dictionary[9223372036854775807] = 77
+    search_dictionary[Vector2(1, 2)] = 4
+    var dictionary_search = complete_search({"action":"find_numbers","kind":"number","comparison":"any","search":"search_dictionary"})
+    check(dictionary_search.candidateCount == 301 and not dictionary_search.truncated, "dictionary continuation visits all keys beyond the chunk size and skips unsupported keys")
+    var dictionary_last = tools.request({"action":"search_results","page":3})
+    check(dictionary_last.rows[0].label.ends_with(".9223372036854775807"), "compact index preserves full-width integer dictionary keys")
+    check(tools.request({"action":"edit","target":dictionary_last.rows[0],"value":"88"}).ok and search_dictionary[9223372036854775807] == 88, "indexed dictionary targets remain editable")
+    search_dictionary.clear()
+    for i in range(200000): search_dictionary["entry_" + str(i)] = i
+    var dict_timing = benchmark_search({"action":"find_numbers","kind":"number","comparison":"any","search":"search_dictionary"}, "200000 dictionary entries through JSON transport")
+    check(dict_timing.candidateCount == 200000 and not dict_timing.truncated, "large dictionary search covers all 200000 entries")
+    check(dict_timing.indexedLocations < 100 and dict_timing.indexRecordsBytes < 20000000, "large dictionary entries also share compact paths and labels")
+    search_dictionary["entry_199000"] = -1
+    var dict_narrow = benchmark_search({"action":"refine_numbers","kind":"number","comparison":"decreased"}, "narrow 200000 dictionary entries through JSON transport")
+    check(dict_narrow.candidateCount == 1 and dict_narrow.rows[0].label.ends_with(".entry_199000"), "large dictionary narrowing finds a late changed key")
+    search_dictionary.clear()
     print("PLAYER_TOOLS_PROOF PASS checks=", checks)
     get_tree().quit()
 
@@ -282,3 +330,15 @@ func wire_request(command):
 
 func test_signal():
     pass
+
+func benchmark_search(command, label):
+    var began = Time.get_ticks_usec()
+    var reply = wire_request(command)
+    var first_us = Time.get_ticks_usec() - began
+    var batches = 1
+    while reply.ok and reply.get("searching", false) and batches < 2000:
+        reply = wire_request({"action":"continue_search","progressOnly":true})
+        batches += 1
+    check(reply.ok and not reply.get("searching", false), "benchmark search completes")
+    print("PLAYER_SEARCH_TIMING " + JSON.stringify({"case":label,"native_ms":float(Time.get_ticks_usec() - began) / 1000.0,"first_batch_ms":float(first_us) / 1000.0,"batches":batches,"examined":reply.examined,"indexed_locations":reply.indexedLocations,"index_records_bytes":reply.indexRecordsBytes,"old_timer_wait_floor_ms":(batches - 1) * 200}))
+    return reply

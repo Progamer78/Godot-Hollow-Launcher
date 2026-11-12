@@ -1,4 +1,5 @@
 import UIKit
+import SwiftUI
 import ObjectiveC
 
 // Engine endpoints are recorded here; the UIKit views and GameInput are the
@@ -121,7 +122,48 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
             mouse.stop(); mouse.removeFromSuperview()
             joystick.removeFromSuperview()
             keyboard.dismissKeyboard(notify: false); keyboard.removeFromSuperview()
-            self.finish(true, "control construction/lifetime, cursor, keyboard, Unicode and release")
+            self.exercisePinnedMonitor(root)
+        }
+    }
+
+    private func exercisePinnedMonitor(_ root: UIView) {
+        // Compare actual rendered pixels with an identical very long name but
+        // different values. In the old combined/truncated Text both images
+        // were identical: the value was entirely offscreen behind the name.
+        let name = String(repeating: "/root/GlobalState.characters.relationships.long_variable_name", count: 20)
+        let pinID = UUID()
+        let host = UIHostingController(rootView: HollowPinnedHUD(rows: [PinnedReadout(id: pinID, name: name, value: "12345")]))
+        window?.rootViewController?.addChild(host)
+        host.view.frame = CGRect(x: 0, y: 140, width: 240, height: 110)
+        host.view.backgroundColor = .black
+        root.addSubview(host.view); host.didMove(toParent: window?.rootViewController)
+        host.view.setNeedsLayout(); host.view.layoutIfNeeded()
+        func rendered() -> UIImage {
+            host.view.layoutIfNeeded()
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true; format.preferredRange = .standard
+            return UIGraphicsImageRenderer(size: host.view.bounds.size, format: format).image { _ in
+                self.check(host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true), "Pin monitor renders into the test image")
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            let firstImage = rendered()
+            host.rootView = HollowPinnedHUD(rows: [PinnedReadout(id: pinID, name: name, value: "98765")])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                let secondImage = rendered()
+                let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                try? firstImage.pngData()?.write(to: folder.appendingPathComponent("hud-long-name-first.png"))
+                try? secondImage.pngData()?.write(to: folder.appendingPathComponent("hud-long-name-second.png"))
+                guard let first = firstImage.cgImage?.dataProvider?.data, let second = secondImage.cgImage?.dataProvider?.data else {
+                    self.finish(false, "Pin monitor pixel data unavailable"); return
+                }
+                let a = first as Data, b = second as Data
+                self.check(a.count == b.count, "Pin monitor rendering has consistent pixel dimensions")
+                let changed = zip(a, b).reduce(0) { $0 + ($1.0 == $1.1 ? 0 : 1) }
+                self.check(changed > 100, "Long pin name must leave the changing value visible (changed bytes: \(changed))")
+                self.record("PLAYER_INPUT_UI_CHECK: long-name pin monitor values visible PASS (\(changed) changed pixel bytes)")
+                host.willMove(toParent: nil); host.view.removeFromSuperview(); host.removeFromParent()
+                self.finish(true, "control construction/lifetime, cursor, keyboard, Unicode, release and long-name pinned HUD values")
+            }
         }
     }
 }

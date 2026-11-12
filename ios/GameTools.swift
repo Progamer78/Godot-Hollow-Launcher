@@ -25,6 +25,7 @@ struct GameTools: View {
     @ObservedObject var state: GameToolsState
     @State private var selected: ToolStat?
     @State private var selectedPin: SavedCheat?
+    @State private var renamingPin = false
     @State private var status = ""
     @State private var paused = false
     @AppStorage("hollowPinnedMonitor") private var showPinnedMonitor = false
@@ -86,7 +87,7 @@ struct GameTools: View {
             }
         }
         .sheet(item:$selectedPin) { pin in
-            SavedPinEditor(pin:pin,onSave:{ updated in
+            SavedPinEditor(pin:pin,nameOnly:renamingPin,onSave:{ updated in
                 guard var game=library.games.first(where:{$0.id == gameID}), let index=game.savedCheats?.firstIndex(where:{$0.id == updated.id}) else { return }
                 game.savedCheats?[index]=updated; library.update(game)
             })
@@ -100,7 +101,13 @@ struct GameTools: View {
             Text("Pin a stat from its editor. Pins save the variable's scene path, not its temporary instance ID. Apply resolves that path again; ambiguous or missing values are refused.").font(.caption)
             ForEach(pins) { pin in
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(pin.name).font(.headline); Text("\(pin.label) = \(pin.value)").font(.caption)
+                    HStack {
+                        Text(pin.displayName).font(.headline)
+                        Spacer()
+                        Button("Rename") { renamingPin = true; selectedPin = pin }.buttonStyle(BorderlessButtonStyle())
+                    }
+                    Text(pin.label).font(.caption).foregroundColor(.secondary).lineLimit(3).textSelection(.enabled)
+                    Text("Pinned value: \(pin.value)").font(.system(.caption, design: .monospaced))
                     if let active = frozenRows.first(where: { $0.label == pin.label && $0.type == pin.type }) {
                         HStack {
                             frozenBadge
@@ -115,7 +122,7 @@ struct GameTools: View {
                         if enabled { showPinnedMonitor = true }
                     })).disabled(pin.monitored != true && pins.filter { $0.monitored == true }.count >= 5)
                     HStack {
-                        Button("Edit Value") { selectedPin=pin }
+                        Button("Edit Value") { renamingPin = false; selectedPin=pin }
                         Button("Apply") { apply(pin, frozen: false) }.disabled(!backedUp)
                         Button("Freeze") { apply(pin, frozen: true) }.disabled(!backedUp)
                         Button("Remove") {
@@ -124,6 +131,7 @@ struct GameTools: View {
                         }
                     }.buttonStyle(BorderlessButtonStyle())
                 }.contextMenu {
+                    Button("Rename") { renamingPin = true; selectedPin = pin }
                     Button("Move to Top") {
                         guard var game = library.games.first(where: { $0.id == gameID }), let index = game.savedCheats?.firstIndex(where: { $0.id == pin.id }) else { return }
                         game.savedCheats?.remove(at: index); game.savedCheats?.insert(pin, at: 0); library.update(game)
@@ -212,23 +220,28 @@ struct GameTools: View {
 
 private struct SavedPinEditor: View {
     @State var pin: SavedCheat
+    var nameOnly = false
     let onSave: (SavedCheat) -> Void
     @Environment(\.presentationMode) private var presentation
     var body: some View {
         NavigationView {
             Form {
-                TextField("Name",text:$pin.name)
-                Text(pin.label).font(.caption)
+                Section(header: Text("Pin name"), footer: Text("This short name appears in Pins and the live monitor. The variable path stays unchanged.")) {
+                    TextField("For example Money or Health",text:$pin.name)
+                }
+                Text(pin.label).font(.caption).foregroundColor(.secondary).textSelection(.enabled)
+                if !nameOnly {
                 if pin.type == "bool" {
                     Picker("Value",selection:$pin.editorValue) { Text("True").tag("true"); Text("False").tag("false") }
                 } else { TextField("Pinned value",text:$pin.value).autocapitalization(.none).disableAutocorrection(true) }
                 Text("Save changes the reusable value. Apply sends it to the game; Freeze applies and holds it. To change an active freeze, use Freeze again after saving.").font(.caption)
-            }.navigationTitle("Edit Pinned Value")
+                }
+            }.navigationTitle(nameOnly ? "Rename Pin" : "Edit Pinned Value")
             .toolbar {
                 ToolbarItem(placement:.cancellationAction) { Button("Cancel") { presentation.wrappedValue.dismiss() } }
-                ToolbarItem(placement:.confirmationAction) { Button("Save") { pin.name=String(pin.name.prefix(80)); pin.value=String(pin.value.prefix(512)); onSave(pin); presentation.wrappedValue.dismiss() } }
+                ToolbarItem(placement:.confirmationAction) { Button("Save") { pin.name=String(pin.displayName.prefix(80)); pin.value=String(pin.value.prefix(512)); onSave(pin); presentation.wrappedValue.dismiss() } }
             }
-        }.navigationViewStyle(StackNavigationViewStyle())
+        }.navigationViewStyle(StackNavigationViewStyle()).onAppear { pin.name = pin.displayName }
     }
 }
 
@@ -270,12 +283,13 @@ private struct StatEditor: View {
                     if let error = error { Text(error).foregroundColor(.red).font(.caption) }
                 }
                 Section(header: Text("Reusable cheat")) {
-                    TextField("Friendly name (optional)", text: $nickname)
+                    TextField("Pin name (for example Money)", text: $nickname)
                     Button("Pin This Value") {
                         guard var game = library.games.first(where: { $0.id == gameID }) else { return }
                         var pins = game.savedCheats ?? []
                         guard pins.count < 20 else { error = "Remove a pin before adding more than 20."; return }
-                        pins.append(SavedCheat(name: nickname.isEmpty ? stat.label : String(nickname.prefix(80)), label: stat.label, type: stat.type, value: String(value.prefix(512))))
+                        let name = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+                        pins.append(SavedCheat(name: name.isEmpty ? SavedCheat.defaultName(for: stat.label) : String(name.prefix(80)), label: stat.label, type: stat.type, value: String(value.prefix(512))))
                         game.savedCheats = pins; library.update(game); presentation.wrappedValue.dismiss()
                     }
                     Button("Apply and Freeze") {

@@ -20,7 +20,24 @@ class PlayerTools : public PlayerToolsBase {
     struct Change { Dictionary target; Variant before; Variant after; };
     Vector<Change> history;
     Array frozen;
-    Array number_candidates;
+    struct IndexedLocation {
+        uint64_t owner = 0;
+        Array path;
+        String label, lower_label;
+    };
+    enum IndexedStep { COMPLETE_PATH, ARRAY_ELEMENT, DICTIONARY_ELEMENT, INTEGER_KEY };
+    struct IndexedValue {
+        int location = 0;
+        IndexedStep step = COMPLETE_PATH;
+        Variant key, before;
+    };
+    struct SearchSnapshot {
+        Vector<IndexedValue> candidates;
+        String filter, kind;
+        int steps = 0;
+    };
+    Vector<IndexedValue> number_candidates, working_candidates;
+    Vector<IndexedLocation> candidate_locations, working_locations;
     bool numeric_only = false;
     bool boolean_only = false;
     bool string_only = false;
@@ -30,7 +47,7 @@ class PlayerTools : public PlayerToolsBase {
     bool search_started = false;
     bool candidate_truncated = false;
     int search_steps = 0;
-    Array search_history;
+    Vector<SearchSnapshot> search_history;
     Array activity_baseline;
     bool activity_ready = false;
     bool activity_truncated = false;
@@ -42,7 +59,11 @@ class PlayerTools : public PlayerToolsBase {
     int working_examined = 0;
     int result_page = 0;
     String working_kind, working_filter, working_scope, working_expected, working_comparison;
-    Array discovery_tasks, working_candidates;
+    int working_type_mask = 0;
+    bool working_name_spans = false, expected_int_valid = false, expected_float_valid = false;
+    int64_t expected_int = 0;
+    double expected_float = 0;
+    Array discovery_tasks;
     std::set<uint64_t> discovery_seen;
     int virtual_pad = -1;
     int original_fps = -1;
@@ -59,6 +80,11 @@ class PlayerTools : public PlayerToolsBase {
     void scan_object(Object *object, const String &label, int depth);
     void scan_value(Object *owner, const Variant &value, const Array &path, const String &label, int depth);
     bool resolve(const Dictionary &target, Object *&owner, Array &path, Variant &value, String &error);
+    bool resolve_path(uint64_t id, const Array &path, Object *&owner, Variant &value, String &error);
+    bool indexed_value(const IndexedValue &candidate, const Vector<IndexedLocation> &locations, Variant &value, int *cached_location = nullptr, Variant *cached_value = nullptr);
+    String indexed_label(const IndexedValue &candidate, const Vector<IndexedLocation> &locations) const;
+    bool indexed_match(const IndexedValue &candidate, const Variant &value) const;
+    void collect_indexed(const IndexedValue &candidate, const Variant &value);
     bool write(Object *owner, const Array &path, int index, Variant &value, const Variant &replacement);
     Dictionary scan(const String &search, const String &scope = "");
     Dictionary edit(const Dictionary &request, bool record = true);
@@ -68,8 +94,8 @@ class PlayerTools : public PlayerToolsBase {
     Dictionary input(const Dictionary &command);
     Dictionary options(const Dictionary &command);
     Dictionary find_numbers(const Dictionary &command);
-    Dictionary search_results();
-    Dictionary continue_search();
+    Dictionary search_results(bool include_rows = true);
+    Dictionary continue_search(bool progress_only = false);
     Dictionary inspect_scene(const Dictionary &command);
     Dictionary scene_changes(const Dictionary &command);
     bool is_frozen(const Dictionary &target) const;

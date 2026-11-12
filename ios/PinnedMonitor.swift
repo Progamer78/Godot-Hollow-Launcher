@@ -22,7 +22,7 @@ struct PinnedMonitorState {
                 if matches.count == 1 { targets[pin.id] = matches[0]; value = matches[0].value; frozen = matches[0].frozen == true }
                 else { value = matches.isEmpty ? "Unavailable" : "Ambiguous" }
             }
-            return PinnedReadout(id: pin.id, name: pin.name, value: value, frozen: frozen)
+            return PinnedReadout(id: pin.id, name: pin.displayName, value: value, frozen: frozen)
         }
     }
 }

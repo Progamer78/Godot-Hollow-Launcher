@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 func require(_ condition: @autoclosure () -> Bool, _ message: String) {
     precondition(condition(), message)
@@ -399,6 +400,15 @@ do {
     require(legacyBoolean.editorValue == "true" && legacyBoolean.value == "True", "Godot 3 capitalized boolean pins must have a valid picker selection without rewriting the saved pin")
     legacyBoolean.editorValue = "false"
     require(legacyBoolean.value == "false", "Editing a migrated boolean pin updates its reusable value")
+    let longPath = "/root/Game/VeryLongNodeName.player.relationships.money"
+    var unnamed = SavedCheat(name: longPath, label: longPath, type: "int", value: "1234567890123456789", monitored: true)
+    require(unnamed.displayName == "money", "Existing default names use the variable leaf instead of the entire structure")
+    require(SavedCheat.defaultName(for: "/root/Game.inventory[2000]") == "inventory[2000]", "Default names retain useful array indices")
+    unnamed.name = "  Spending Money  "
+    let renamed = try JSONDecoder().decode(SavedCheat.self, from: JSONEncoder().encode(unnamed))
+    require(renamed.displayName == "Spending Money" && renamed.label == longPath && renamed.value == "1234567890123456789" && renamed.monitored == true, "Renaming persists without altering target, value or monitor selection")
+    unnamed.name = " \n "
+    require(unnamed.displayName == "money", "Blank names fall back to a useful short label")
 }
 
 do {
@@ -434,3 +444,59 @@ do {
     require(reordered.games.first?.savedCheats?.map(\.id) == [firstPin.id, topPin.id] && reordered.games.first?.savedCheats?.last?.monitored == false, "Library update persists new pin ordering without changing monitor choices")
 }
 print("Persistent search state, pagination, scene inspector and pin ordering/selection passed")
+
+do {
+    func searchReply(busy: Bool, rows: [ToolStat]?, examined: Int) -> ToolReply {
+        var reply = ToolReply(ok: true, message: nil, rows: rows, truncated: false, visited: nil, undoCount: nil)
+        reply.searching = busy; reply.searchDiscovery = busy; reply.searchStarted = !busy
+        reply.examined = examined; reply.workingMatches = busy ? 0 : 1; reply.candidateCount = busy ? 0 : 1
+        return reply
+    }
+    let row = try JSONDecoder().decode(ToolStat.self, from: Data(#"{"object":"123","path":[{"kind":"property","name":"money"}],"label":"/root/Game.money","type":"int","value":"81"}"#.utf8))
+    let state = GameToolsState()
+    var calls = 0
+    var progressOnlyCalls = 0
+    var uiUpdates = 0
+    let observer = state.$examined.sink { _ in uiUpdates += 1 }
+    state.setSearchActive(true, send: { command in
+        require(command["action"] as? String == "continue_search", "Search pump only advances its existing search")
+        calls += 1
+        if command["progressOnly"] as? Bool == true { progressOnlyCalls += 1 }
+        return searchReply(busy: calls < 80, rows: calls == 80 ? [row] : nil, examined: calls * 512)
+    })
+    state.receive(searchReply(busy: true, rows: [row], examined: 0))
+    require(state.rows == [row] && state.discovering, "Initial matches are usable before complete discovery")
+    let started = Date()
+    while state.searching && Date().timeIntervalSince(started) < 2 {
+        _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    }
+    require(!state.searching && calls == 80, "80 batches finish within 2 seconds; the old heartbeat needed at least 16 seconds")
+    require(state.rows == [row] && state.hasSearch && !state.discovering, "Completion replaces preview with the final result")
+    require(progressOnlyCalls > 0 && uiUpdates < calls / 2, "Progress work avoids per-batch row reads and excessive UI publications")
+    let afterCompletion = calls
+    _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    require(calls == afterCompletion, "Idle search schedules no additional engine work")
+    observer.cancel()
+    print("Search scheduling: 80 batches completed in \(Int(Date().timeIntervalSince(started) * 1000)) ms, \(uiUpdates) progress updates")
+
+    let paused = GameToolsState()
+    var resumedCalls = 0
+    paused.setSearchActive(true, send: { _ in resumedCalls += 1; return searchReply(busy: false, rows: [], examined: 1) })
+    paused.receive(searchReply(busy: true, rows: [row], examined: 0))
+    paused.setSearchActive(false)
+    _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    require(resumedCalls == 0 && paused.rows == [row] && paused.searching, "Backgrounding invalidates pending callbacks without discarding a search")
+    paused.setSearchActive(true)
+    let resumeDeadline = Date().addingTimeInterval(1)
+    while paused.searching && Date() < resumeDeadline { _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01)) }
+    require(resumedCalls == 1 && !paused.searching && paused.rows.isEmpty, "Foregrounding resumes once and an empty completed result clears preview rows")
+
+    let cancelled = GameToolsState()
+    var obsoleteCalls = 0
+    cancelled.setSearchActive(true, send: { _ in obsoleteCalls += 1; return searchReply(busy: false, rows: [], examined: 0) })
+    cancelled.receive(searchReply(busy: true, rows: [row], examined: 0))
+    cancelled.receive(searchReply(busy: false, rows: [], examined: 0))
+    _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    require(obsoleteCalls == 0, "Cancelling invalidates the queued callback before it can touch the engine")
+}
+print("Fast yielding search pump, progress throttling, preview retention and lifecycle cancellation passed")

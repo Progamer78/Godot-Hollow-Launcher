@@ -31,6 +31,7 @@ struct ToolReply: Decodable {
     var physicsMs: Double? = nil
     var engineMemoryBytes: Double? = nil
     var searching: Bool? = nil
+    var searchDiscovery: Bool? = nil
     var examined: Int? = nil
     var workingMatches: Int? = nil
     var page: Int? = nil
@@ -80,6 +81,14 @@ struct SavedCheat: Codable, Identifiable, Equatable {
     var type: String
     var value: String
     var monitored: Bool?
+    static func defaultName(for label: String) -> String {
+        let last = label.split(whereSeparator: { $0 == "." || $0 == "/" }).last.map(String.init) ?? label
+        return String(last.prefix(80))
+    }
+    var displayName: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == label ? Self.defaultName(for: label) : trimmed
+    }
     var editorValue: String {
         get { type == "bool" ? value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() : value }
         set { value = newValue }

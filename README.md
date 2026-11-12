@@ -19,7 +19,7 @@ A native, offline iPhone launcher for Godot games you supply. Import games after
 
 Open the library's gear button for **Settings & Help**. The performance HUD is off by default; choose any corner. It shows engine FPS, average frame interval, process/physics time and available engine allocation memory. It does not intercept touch input.
 
-In **Game Tools > Pins**, select **Show in monitor** on up to five pins. Selecting a pin enables the monitor; the overall toggle can hide it. Use **Edit** to drag pins into order, or hold a pin and choose **Move to Top**. Order and selection save per game, and the monitor follows that order without blocking taps. Frozen variables show a snowflake/Frozen indicator; Pins also lists active freezes with individual Unfreeze buttons.
+In **Game Tools > Pins**, select **Show in monitor** on up to five pins. Selecting a pin enables the monitor; the overall toggle can hide it. Use **Rename** for a short custom label. Names and values have separate lines in the monitor. Use **Edit** to drag pins into order, or hold a pin and choose **Move to Top**. Order and selection save per game, and the monitor follows that order without blocking taps. Frozen variables show a snowflake/Frozen indicator; Pins also lists active freezes with individual Unfreeze buttons.
 
 **Search** combines name/path, type, value and change filters. Candidates, baseline, filters and page survive closing tools during the running game. Refreshing values and switching pages preserve the comparison baseline; only narrowing advances it. **Scene** shows active paths, script names, connected signals and snapshot changes. See [search and scene tools](docs/search-scene.md).
 

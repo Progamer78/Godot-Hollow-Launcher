@@ -179,7 +179,6 @@ struct GameScreen: View {
             controllerInput.configure(profile.controller,active:launchReady && !editing && !menuOpen && !showingTools && !showingKeyboard && !showingController && !showingGestures,view:session.controller.view)
             if launchReady {
                 _ = ToolsBridge.send(["action": "tick"])
-                if toolsState.searching { toolsState.receive(ToolsBridge.send(["action": "continue_search"])) }
             }
             if now.timeIntervalSince(lastTick) >= 1 {
                 lastTick = now
@@ -219,9 +218,10 @@ struct GameScreen: View {
         .sheet(isPresented: $showingTools, onDismiss: {
             syncMouseMode()
         }) { GameTools(gameID: session.id, state: toolsState) }
-        .onAppear { GameInput.outputDevice=profile.controller?.enabled == true ? 0 : nil; UIApplication.shared.isIdleTimerDisabled = keepAwake; syncMouseMode() }
-        .onDisappear { controllerInput.stop(); GameInput.release(); PlayerRuntime.setMouseEnabled(false); UIApplication.shared.isIdleTimerDisabled = false }
+        .onAppear { toolsState.setSearchActive(phase == .active, send: ToolsBridge.send); GameInput.outputDevice=profile.controller?.enabled == true ? 0 : nil; UIApplication.shared.isIdleTimerDisabled = keepAwake; syncMouseMode() }
+        .onDisappear { toolsState.setSearchActive(false); controllerInput.stop(); GameInput.release(); PlayerRuntime.setMouseEnabled(false); UIApplication.shared.isIdleTimerDisabled = false }
         .onChange(of: phase) { value in
+            toolsState.setSearchActive(value == .active)
             UIApplication.shared.isIdleTimerDisabled = keepAwake && value == .active
             if value != .active {
                 controllerInput.stop()
