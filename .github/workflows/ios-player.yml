@@ -168,6 +168,7 @@ jobs:
           python3 tools/patch_godot3.py .cache/godot3-source
           python3 -m venv .cache/scons3-env
           .cache/scons3-env/bin/pip install scons==4.10.1
+          mkdir -p "$GITHUB_WORKSPACE/.cache/hollow-engine-cache"
           cd .cache/godot3-source
           export SCONS_CACHE="$GITHUB_WORKSPACE/.cache/hollow-engine-cache/godot3"
           export SCONS_CACHE_LIMIT=3072
@@ -187,6 +188,7 @@ jobs:
           set -o pipefail
           python3 -m venv .cache/scons-env
           .cache/scons-env/bin/pip install scons==4.10.1
+          mkdir -p "$GITHUB_WORKSPACE/.cache/hollow-engine-cache"
           cd .cache/godot-source
           runtime_flags=(platform=ios target=template_release arch=arm64
             "cache_path=$GITHUB_WORKSPACE/.cache/hollow-engine-cache/godot4" cache_limit=3
