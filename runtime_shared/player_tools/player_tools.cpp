@@ -671,6 +671,7 @@ Dictionary PlayerTools::continue_search() {
         if ((working_kind == "number" && type != "int" && type != "float") || (working_kind == "bool" && type != "bool") || (working_kind == "string" && type != "string")) continue;
         if (String(row["value"]).length() > 512) continue;
         String now = value.get_type() == Variant::BOOL ? (bool(value) ? String("true") : String("false")) : String(value), before = row["value"];
+        if (now.length() > 512) continue;
         bool increased = false, decreased = false;
         if (value.get_type() == Variant::INT) {
             bool valid = false; int64_t old = parse_integer(before, valid);
@@ -731,8 +732,10 @@ Dictionary PlayerTools::search_results() {
         if (!resolve(original, owner, path, value, error)) { stale++; continue; }
         Node *node = Object::cast_to<Node>(owner);
         if (node && !node->is_inside_tree()) { stale++; continue; }
+        String display = value.get_type() == Variant::BOOL ? (bool(value) ? String("true") : String("false")) : String(value);
+        if (display.length() > 512) { stale++; continue; }
         Dictionary row = original.duplicate(); row["previous"] = original["value"];
-        row["value"] = value.get_type() == Variant::BOOL ? (bool(value) ? String("true") : String("false")) : String(value);
+        row["value"] = display;
         row["frozen"] = is_frozen(row); displayed.push_back(row);
     }
     Dictionary result; result["ok"] = true; result["rows"] = displayed; result["searchStarted"] = search_started;

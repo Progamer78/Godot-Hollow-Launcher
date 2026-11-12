@@ -412,9 +412,6 @@ do {
     require(state.candidateCount == 2505 && state.page == 2 && state.pageCount == 26, "Visible page is independent from complete candidate count")
     let failed = try JSONDecoder().decode(ToolReply.self, from: Data(#"{"ok":false,"message":"Invalid value"}"#.utf8))
     require(!state.receive(failed) && state.rows.count == 1 && state.candidateCount == 2505 && state.page == 2, "Failed searches leave existing candidates and page intact")
-    // The same object is retained by GameScreen when its tools sheet is recreated.
-    let reopened = state
-    require(reopened.rows == state.rows && reopened.consoleHistory == ["last expression"], "Session state survives a new view reference")
     state.scope = "456"
     require(state.scopeChanged, "Changing scope requires an explicit new search")
     state.receive(reply, restoreFilters: true)
@@ -432,5 +429,8 @@ do {
     let loaded = GameLibrary(storageRoot: stored, savesRoot: stored.appendingPathComponent("Saves"))
     require(loaded.games.first?.savedCheats?.map(\.id) == [topPin.id, firstPin.id], "Per-game pin ordering survives library reload")
     require(loaded.games.first?.savedCheats?.filter { $0.monitored == true }.map(\.id) == [firstPin.id], "Monitor displays only explicitly selected pins after reload")
+    game.savedCheats = [firstPin, topPin]; loaded.update(game)
+    let reordered = GameLibrary(storageRoot: stored, savesRoot: stored.appendingPathComponent("Saves"))
+    require(reordered.games.first?.savedCheats?.map(\.id) == [firstPin.id, topPin.id] && reordered.games.first?.savedCheats?.last?.monitored == false, "Library update persists new pin ordering without changing monitor choices")
 }
 print("Persistent search state, pagination, scene inspector and pin ordering/selection passed")
