@@ -1,3 +1,9 @@
+# Hollow release update - November 11, 2026
+
+Both complete Windows engines compiled and executed 94 checks each (188 total) in the original tools proof PCKs. New cases cover performance monitor fields, numeric name filters, invalid input rejection, boolean search/refinement/editing and pinned live reads. All 23 Python/native helper tests passed. All 27 Swift source/test files parsed, with no direct local redeclarations; Python AST, workflow YAML and all 18 shell blocks passed syntax checks. These checks do not replace an Apple SDK compile.
+
+The expanded Swift model suite, complete iPhone type-check, simulator input checks and final IPA are pending GitHub Actions. Physical device behavior remains untested for this update. See docs/hollow-release.md for the device checklist. No new IPA was produced locally on Windows.
+
 # Validation recorded November 8, 2026
 
 ## Control profile compile repair - November 8

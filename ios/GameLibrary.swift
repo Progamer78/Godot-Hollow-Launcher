@@ -23,6 +23,10 @@ struct Game: Codable, Identifiable {
     var frameLimit: Int?
     var savedCheats: [SavedCheat]?
     var displayInset: Double?
+    var displayName: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Untitled game" : trimmed
+    }
     var displayOrientation: String {
         let value = orientation ?? "automatic"
         return ["portrait", "landscape"].contains(value) ? value : "automatic"
@@ -59,13 +63,30 @@ enum RuntimeSelection {
 final class GameLibrary: ObservableObject {
     @Published private(set) var games: [Game] = []
     @Published var error: String?
+    @Published var notice: String?
     @Published var importing = false
+    @Published private(set) var importStatus = ""
     @Published private(set) var pendingImport: ImportCandidate?
     private var manifestUsable = true
     private let files = FileManager.default
     let root: URL
     let saves: URL
     private var manifest: URL { root.appendingPathComponent("library.json") }
+    private var manifestBackup: URL { root.appendingPathComponent("library.previous.json") }
+    var readOnly: Bool { !manifestUsable }
+
+    private static func decodeManifest(_ data: Data) throws -> [Game] {
+        guard data.count <= 16 * 1024 * 1024 else { throw PackError.invalid("The library index is too large.") }
+        var result = try JSONDecoder().decode([Game].self, from: data)
+        guard Set(result.map(\.id)).count == result.count else { throw PackError.invalid("Duplicate IDs in library manifest.") }
+        for index in result.indices {
+            result[index].name = String(result[index].name.prefix(120))
+            if let seconds = result[index].playedSeconds { result[index].playedSeconds = seconds.isFinite ? min(3_153_600_000, max(0, seconds)) : 0 }
+            if let inset = result[index].displayInset { result[index].displayInset = inset.isFinite ? min(48, max(0, inset)) : 0 }
+            if let fps = result[index].frameLimit, ![0, 30, 60, 120].contains(fps) { result[index].frameLimit = nil }
+        }
+        return result
+    }
 
     init(storageRoot: URL? = nil, savesRoot: URL? = nil) {
         root = storageRoot ?? files.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("GodotPlayer")
@@ -73,9 +94,18 @@ final class GameLibrary: ObservableObject {
         do {
             try files.createDirectory(at: root.appendingPathComponent("Games"), withIntermediateDirectories: true)
             try files.createDirectory(at: saves, withIntermediateDirectories: true)
-            if files.fileExists(atPath: manifest.path) {
-                games = try JSONDecoder().decode([Game].self, from: Data(contentsOf: manifest))
-                guard Set(games.map(\.id)).count == games.count else { throw PackError.invalid("Duplicate IDs in library manifest.") }
+            if files.fileExists(atPath: manifest.path) || files.fileExists(atPath: manifestBackup.path) {
+                do { games = try Self.decodeManifest(Data(contentsOf: manifest)) }
+                catch {
+                    let previous = try Data(contentsOf: manifestBackup)
+                    let recovered = try Self.decodeManifest(previous)
+                    if files.fileExists(atPath: manifest.path) {
+                        try files.copyItem(at: manifest, to: root.appendingPathComponent("library-unreadable-\(UUID().uuidString).json"))
+                    }
+                    try previous.write(to: manifest, options: .atomic)
+                    games = recovered
+                    notice = "Your library index was recovered from its previous copy. Game and save files were kept. Your latest library edits may need to be repeated."
+                }
             }
         } catch {
             manifestUsable = false
@@ -89,7 +119,16 @@ final class GameLibrary: ObservableObject {
 
     func persist(_ updated: [Game]) throws {
         guard manifestUsable else { throw PackError.invalid("The library manifest needs recovery before changes can be saved.") }
-        try JSONEncoder().encode(updated).write(to: manifest, options: .atomic)
+        let data = try JSONEncoder().encode(updated)
+        _ = try Self.decodeManifest(data)
+        if files.fileExists(atPath: manifest.path) {
+            let previous = try Data(contentsOf: manifest)
+            _ = try Self.decodeManifest(previous)
+            try previous.write(to: manifestBackup, options: .atomic)
+        } else {
+            try data.write(to: manifestBackup, options: .atomic)
+        }
+        try data.write(to: manifest, options: .atomic)
         games = updated
     }
 
@@ -110,19 +149,33 @@ final class GameLibrary: ObservableObject {
     }
 
     func delete(_ game: Game) {
+        guard !importing, pendingImport == nil, games.contains(where: { $0.id == game.id }) else { return }
+        let staging = root.appendingPathComponent("delete-\(UUID().uuidString)")
+        var moved: [(URL, URL)] = []
         do {
-            // Remove the manifest entry before deleting files. UUIDs, never PCK
-            // paths or user names, select directories for filesystem mutations.
+            guard manifestUsable else { throw PackError.invalid("Recover the library before removing games.") }
+            try files.createDirectory(at: staging, withIntermediateDirectories: true)
+            for (index, original) in [directory(game.id), saveURL(game), root.appendingPathComponent("Backups/\(game.id.uuidString)")].enumerated() where files.fileExists(atPath: original.path) {
+                let staged = staging.appendingPathComponent(String(index))
+                try files.moveItem(at: original, to: staged)
+                moved.append((original, staged))
+            }
             try persist(games.filter { $0.id != game.id })
-            try files.removeItem(at: directory(game.id))
-            if files.fileExists(atPath: saveURL(game).path) { try files.removeItem(at: saveURL(game)) }
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            for (original, staged) in moved.reversed() { try? files.moveItem(at: staged, to: original) }
+            self.error = "Could not remove the game: \(error.localizedDescription)"
+            return
+        }
+        // The manifest backup must not resurrect a deliberately removed game.
+        try? JSONEncoder().encode(games).write(to: manifestBackup, options: .atomic)
+        DispatchQueue.global(qos: .utility).async { try? self.files.removeItem(at: staging) }
     }
 
     func importPack(_ source: URL, companion: URL? = nil, replacing existing: Game? = nil, engineHint: UInt32? = nil) {
         guard !importing, pendingImport == nil else { return }
         guard manifestUsable else { error = "The library manifest needs recovery before importing."; return }
         importing = true
+        importStatus = "Opening game files…"
         let staging = root.appendingPathComponent("import-\(UUID().uuidString).pck")
         DispatchQueue.global(qos: .userInitiated).async {
             let access = source.startAccessingSecurityScopedResource()
@@ -135,11 +188,17 @@ final class GameLibrary: ObservableObject {
                 var coordinationError: NSError?
                 var copyError: Error?
                 var note: String?
+                var prepared: PreparedGame?
+                let storedKey = try existing.flatMap { try self.scriptKey($0) }
+                let progress: (String) -> Void = { message in DispatchQueue.main.async { self.importStatus = message } }
                 NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { readable in
                     do {
                         let values = try readable.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
                         guard values.isRegularFile == true, values.isSymbolicLink != true else { throw PackError.invalid("The selected item is not a regular file.") }
-                        note = try PackageImport.prepare(readable, destination: staging, engineHint: engineHint)
+                        note = try PackageImport.prepare(readable, destination: staging, engineHint: engineHint, progress: progress)
+                        if companion == nil && source.pathExtension.lowercased() != "exe" {
+                            prepared = try PackageImport.inspectPrepared(staging, source: readable, note: note, existingKey: storedKey, progress: progress)
+                        }
                     } catch { copyError = error }
                 }
                 if let error = coordinationError { throw error }
@@ -162,12 +221,11 @@ final class GameLibrary: ObservableObject {
                     if recovered.1 != nil { note = (note.map { $0 + " " } ?? "") + "Original runtime script key recovered and all encrypted scripts validated. Game files are unchanged." }
                     return (recovered.0, note, recovered.1)
                 }
-                let key = try existing.flatMap { try self.scriptKey($0) }
-                let info = try ExecutableImport.inspect(staging, key: key)
-                return (info, note, (info.encryptedScriptCount ?? 0) > 0 ? key : nil)
+                guard let imported = prepared else { throw PackError.invalid("The game could not be inspected. Try importing its original files again.") }
+                return (imported.pack, imported.note, imported.key)
             }
             DispatchQueue.main.async {
-                defer { self.importing = false }
+                defer { self.importing = false; self.importStatus = "" }
                 do {
                     let (info, note, key) = try result.get()
                     if let game = existing {
@@ -225,10 +283,11 @@ final class GameLibrary: ObservableObject {
     func confirmImport() {
         guard !importing, let pending = pendingImport else { return }
         importing = true
+        importStatus = "Backing up saves and replacing game…"
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Result { try self.vault.backup(pending.game.id, label: "Automatic: before game replacement") }
             DispatchQueue.main.async {
-                defer { self.importing = false; self.pendingImport = nil; try? self.files.removeItem(at: pending.staging) }
+                defer { self.importing = false; self.importStatus = ""; self.pendingImport = nil; try? self.files.removeItem(at: pending.staging) }
                 do {
                     _ = try result.get()
                     try self.install(staging: pending.staging, info: pending.pack, note: pending.note, name: pending.game.name, existing: pending.game, key: pending.key)

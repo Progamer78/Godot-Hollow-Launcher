@@ -7,7 +7,7 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def prepare(export, library, spine_license=None, compatibility_license=None):
+def prepare(export, library, spine_license=None, compatibility_license=None, spine_version=None):
     notices = [
         ("GodotEngineNotices", (ROOT / "licenses/GODOT-LICENSE.txt").read_text(encoding="utf-8") + "\n" +
          (ROOT / "licenses/GODOT-COPYRIGHT.txt").read_text(encoding="utf-8")),
@@ -28,6 +28,9 @@ def prepare(export, library, spine_license=None, compatibility_license=None):
     shutil.copy2(library, target)
     info = export / "player/player-Info.plist"
     data = plistlib.loads(info.read_bytes())
+    data["CFBundleDisplayName"] = "Godot Hollow Launcher"
+    data["CFBundleName"] = "Godot Hollow Launcher"
+    data["HollowSpineRuntime"] = spine_version or ("Bundled" if spine_license else "none")
     data["MinimumOSVersion"] = "15.0"
     for permission in ["NSCameraUsageDescription", "NSMicrophoneUsageDescription", "NSPhotoLibraryUsageDescription"]:
         data.pop(permission, None)
@@ -59,6 +62,7 @@ def prepare(export, library, spine_license=None, compatibility_license=None):
     # extra Xcode groups or changing engine/framework linker settings.
     strings = export / "player/en.lproj/InfoPlist.strings"
     with strings.open("a", encoding="utf-8") as out:
+        out.write('\n"CFBundleDisplayName" = "Godot Hollow Launcher";\n')
         for key, text in notices:
             escaped = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
             out.write('\n"' + key + '" = "' + escaped + '";\n')
@@ -71,5 +75,6 @@ if __name__ == "__main__":
     parser.add_argument("library", type=Path)
     parser.add_argument("--spine-license", type=Path)
     parser.add_argument("--compatibility-license", type=Path)
+    parser.add_argument("--spine-version", choices=["4.1", "4.2", "4.3", "none"])
     args = parser.parse_args()
-    prepare(args.export.resolve(), args.library.resolve(), args.spine_license, args.compatibility_license)
+    prepare(args.export.resolve(), args.library.resolve(), args.spine_license, args.compatibility_license, args.spine_version)

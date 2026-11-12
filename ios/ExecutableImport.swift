@@ -11,7 +11,10 @@ enum ExecutableImport {
         return try PCKInspector.inspect(pack)
     }
     static func recover(executable: URL, pack: URL) throws -> (PackInfo, Data?) {
-        if let info = try? PCKInspector.inspect(pack) { return (info, nil) }
+        do { return (try PCKInspector.inspect(pack), nil) }
+        catch let error as PackError {
+            guard case .encryptedScripts(let major, _, _) = error, major == 3 else { throw error }
+        }
         let keys = try GPArchive.candidateKeys(executable.path)
         for key in keys {
             if let info = try? inspect(pack, key: key), info.major == 3, (info.encryptedScriptCount ?? 0) > 0 { return (info, key) }

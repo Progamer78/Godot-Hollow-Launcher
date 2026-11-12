@@ -12,6 +12,7 @@ struct ToolStat: Codable, Identifiable, Equatable {
     let label: String
     let type: String
     let value: String
+    var frozen: Bool? = nil
     var id: String { object + ":" + path.map { "\($0.kind):\($0.name ?? ""):\($0.index ?? -1)" }.joined(separator: "/") }
 }
 
@@ -23,6 +24,11 @@ struct ToolReply: Decodable {
     let visited: Int?
     let undoCount: Int?
     var ready: Bool? = nil
+    var fps: Double? = nil
+    var frameMs: Double? = nil
+    var processMs: Double? = nil
+    var physicsMs: Double? = nil
+    var engineMemoryBytes: Double? = nil
 }
 
 struct SavedCheat: Codable, Identifiable, Equatable {
@@ -31,6 +37,14 @@ struct SavedCheat: Codable, Identifiable, Equatable {
     var label: String
     var type: String
     var value: String
+    var monitored: Bool?
     // A stable scene/resource label is resolved again each session. Instance
     // IDs are deliberately not persisted across process lifetimes.
+}
+
+struct PinnedReadout: Identifiable {
+    let id: UUID
+    let name: String
+    let value: String
+    var frozen = false
 }

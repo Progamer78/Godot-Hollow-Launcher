@@ -35,11 +35,17 @@ struct GameTools: View {
     @State private var history: [String] = []
     @State private var number = ""
     @State private var comparison = "exact"
+    @State private var findRows: [ToolStat] = []
+    @State private var findName = ""
+    @AppStorage("hollowValueSearchKind") private var findKind = "number"
+    @State private var booleanValue = "true"
+    @AppStorage("hollowPinnedMonitor") private var showPinnedMonitor = false
     @State private var backedUp = false
     @State private var backupFailed = false
     @State private var speed = 1.0
     @State private var watching = false
     @State private var browsing = false
+    @State private var frozenRows: [ToolStat] = []
     private let watchTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -69,6 +75,7 @@ struct GameTools: View {
             let reply = ToolsBridge.send(["action": "pause", "enabled": true])
             paused = reply.ok
             refresh()
+            refreshFreezes()
             DispatchQueue.global(qos: .userInitiated).async {
                 let result = Result { try library.vault.backup(gameID, label: "Automatic: before tools") }
                 DispatchQueue.main.async {
@@ -76,10 +83,17 @@ struct GameTools: View {
                 }
             }
         }
-        .onReceive(watchTimer) { _ in if watching && tab == "stats" { refresh() } }
+        .onReceive(watchTimer) { _ in
+            if watching && tab == "stats" { refresh() }
+            if tab == "pins" { refreshFreezes() }
+        }
+        .onChange(of: tab) { _ in refreshFreezes() }
         .onDisappear { _ = ToolsBridge.send(["action": "pause", "enabled": false]) }
         .sheet(item: $selected) { stat in
-            StatEditor(stat: stat, gameID: gameID) { refresh() }
+            StatEditor(stat: stat, gameID: gameID) {
+                refreshFreezes()
+                if tab == "find" { find(start: false, mode: "any") } else { refresh() }
+            }
         }
         .sheet(item:$selectedPin) { pin in
             SavedPinEditor(pin:pin,onSave:{ updated in
@@ -123,6 +137,7 @@ struct GameTools: View {
                                 Text(stat.value).font(.system(.body, design: .monospaced)).lineLimit(2).foregroundColor(.primary)
                                 Spacer()
                                 Text(stat.type).font(.caption).foregroundColor(.secondary)
+                                if stat.frozen == true { frozenBadge }
                                 Image(systemName: stat.type == "object" ? "chevron.right" : "pencil").foregroundColor(.blue)
                             }
                         }.padding(.vertical, 3)
@@ -136,47 +151,86 @@ struct GameTools: View {
                 refresh()
                 status = reply.message ?? ""
             }.disabled(undoCount == 0 || !backedUp)
-            Button("Release All Frozen Values") { status = ToolsBridge.send(["action": "clear_freezes"]).ok ? "Freezes released." : "The scene is not ready." }
+            Button("Release All Frozen Values") {
+                let reply = ToolsBridge.send(["action": "clear_freezes"])
+                refresh(); refreshFreezes(); status = reply.ok ? "Freezes released." : "The scene is not ready."
+            }
         }.listStyle(InsetGroupedListStyle())
     }
 
     private var findView: some View {
         List {
-            Section(header: Text("Find a number"), footer: Text("Start a search, close tools to change the value in the game, then reopen Find and narrow the results. Candidates stay for this session. Searches up to 150 live script numbers; this is not a raw memory scanner.")) {
-                TextField("Current value, for example 55", text: $number).keyboardType(.numbersAndPunctuation)
+            Section(header: Text("Find a value"), footer: Text("Start a search, close tools to change a value in the game, then reopen Find and narrow the results. The optional variable name/path filter is applied before the 150-result limit. Candidates stay for this game session. This searches live script values, not raw memory.")) {
+                Picker("Value type", selection: $findKind) { Text("Number").tag("number"); Text("Boolean").tag("bool") }
+                    .onChange(of: findKind) { _ in comparison = "exact"; findRows = []; status = "Start a new search for the selected value type." }
+                TextField("Variable name or path (optional)", text: $findName).autocapitalization(.none).disableAutocorrection(true)
+                if findKind == "bool" {
+                    Picker("Value", selection: $booleanValue) { Text("True").tag("true"); Text("False").tag("false") }.pickerStyle(SegmentedPickerStyle())
+                } else { TextField("Current value, for example 55", text: $number).keyboardType(.numbersAndPunctuation) }
                 Button("Start Exact Search") { find(start: true, mode: "exact") }
-                Button("Start with Any Number") { find(start: true, mode: "any") }
+                Button(findKind == "bool" ? "Start with Any Boolean" : "Start with Any Number") { find(start: true, mode: "any") }
                 Picker("Refine by", selection: $comparison) {
-                    Text("Equals entered value").tag("exact"); Text("Changed").tag("changed"); Text("Unchanged").tag("unchanged"); Text("Increased").tag("increased"); Text("Decreased").tag("decreased")
+                    Text("Equals selected value").tag("exact"); Text("Changed").tag("changed"); Text("Unchanged").tag("unchanged")
+                    if findKind != "bool" { Text("Increased").tag("increased"); Text("Decreased").tag("decreased") }
                 }
                 Button("Narrow Results") { find(start: false, mode: comparison) }
                 Text(status).font(.caption)
             }
-            ForEach(rows) { stat in Button("\(stat.label) = \(stat.value)") { selected = stat }.disabled(!backedUp) }
+            ForEach(findRows) { stat in Button { selected = stat } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(stat.label).font(.caption).foregroundColor(.secondary)
+                    HStack { Text(stat.type == "bool" ? (stat.value == "true" ? "True" : "False") : stat.value).font(.system(.body, design: .monospaced)); if stat.frozen == true { frozenBadge } }
+                }
+            }.disabled(!backedUp) }
         }.listStyle(InsetGroupedListStyle())
     }
     private func find(start: Bool, mode: String) {
-        let reply = ToolsBridge.send(["action": start ? "find_numbers" : "refine_numbers", "comparison": mode, "value": number])
-        rows = reply.rows ?? []; status = reply.ok ? "\(rows.count) candidates. Change the number in the game, then narrow again." : (reply.message ?? "Search failed.")
+        let reply = ToolsBridge.send(["action": start ? "find_numbers" : "refine_numbers", "comparison": mode, "value": findKind == "bool" ? booleanValue : number, "kind": findKind, "search": findName])
+        findRows = reply.rows ?? []; status = reply.ok ? "\(findRows.count) candidates. Change the value in the game, then narrow again." : (reply.message ?? "Search failed.")
     }
     private var pinsView: some View {
         List {
+            Toggle("Pinned value monitor", isOn: $showPinnedMonitor)
+            Text("Select up to five pins below. The monitor shows their current live values while playing and never intercepts taps.").font(.caption).foregroundColor(.secondary)
             Text("Pin a stat from its editor. Pins save the variable's scene path, not its temporary instance ID. Apply resolves that path again; ambiguous or missing values are refused.").font(.caption)
             ForEach(library.games.first { $0.id == gameID }?.savedCheats ?? []) { pin in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(pin.name).font(.headline); Text("\(pin.label) = \(pin.value)").font(.caption)
+                    if let active = frozenRows.first(where: { $0.label == pin.label && $0.type == pin.type }) {
+                        HStack {
+                            frozenBadge
+                            Text("Held at \(active.value)").font(.caption)
+                            Spacer()
+                            Button("Unfreeze") { unfreeze(active) }.buttonStyle(BorderlessButtonStyle())
+                        }
+                    }
+                    Toggle("Show in monitor", isOn: Binding(get: { pin.monitored == true }, set: { enabled in
+                        guard var game = library.games.first(where: { $0.id == gameID }), let index = game.savedCheats?.firstIndex(where: { $0.id == pin.id }) else { return }
+                        game.savedCheats?[index].monitored = enabled; library.update(game)
+                    })).disabled(pin.monitored != true && (library.games.first { $0.id == gameID }?.savedCheats?.filter { $0.monitored == true }.count ?? 0) >= 5)
                     HStack {
                         Button("Edit Value") { selectedPin=pin }
-                        Button("Apply") { apply(pin, frozen: false) }
-                        Button("Freeze") { apply(pin, frozen: true) }
+                        Button("Apply") { apply(pin, frozen: false) }.disabled(!backedUp)
+                        Button("Freeze") { apply(pin, frozen: true) }.disabled(!backedUp)
                         Button("Remove") {
                             guard var game = library.games.first(where: { $0.id == gameID }) else { return }
                             game.savedCheats?.removeAll { $0.id == pin.id }; library.update(game)
                         }
                     }.buttonStyle(BorderlessButtonStyle())
                 }
-            }.disabled(!backedUp)
-            Button("Release All Frozen Values") { _ = ToolsBridge.send(["action": "clear_freezes"]); status = "Freezes released." }
+            }
+            if !frozenRows.isEmpty {
+                Section(header: Text("Active freezes (\(frozenRows.count))")) {
+                    ForEach(frozenRows) { stat in
+                        HStack {
+                            VStack(alignment: .leading) { Text(stat.label).font(.caption); Text("Frozen at \(stat.value)").font(.caption).foregroundColor(.secondary) }
+                            Spacer()
+                            Button("Unfreeze") { unfreeze(stat) }.buttonStyle(BorderlessButtonStyle())
+                        }
+                    }
+                }
+            }
+            Button("Release All Frozen Values") { _ = ToolsBridge.send(["action": "clear_freezes"]); refreshFreezes(); status = "Freezes released." }
             Text(status).font(.caption)
         }.listStyle(InsetGroupedListStyle())
     }
@@ -185,6 +239,15 @@ struct GameTools: View {
         guard matches.count == 1, let target = ToolsBridge.target(matches[0]) else { status = "The pinned variable is missing or ambiguous in the current scene."; return }
         let reply = ToolsBridge.send(["action": frozen ? "freeze" : "edit", "target": target, "value": pin.value])
         status = reply.message ?? (reply.ok ? "Applied" : "Failed")
+        refreshFreezes()
+    }
+
+    private var frozenBadge: some View { Label("Frozen", systemImage: "snowflake").font(.caption).foregroundColor(.blue) }
+    private func refreshFreezes() { frozenRows = ToolsBridge.send(["action": "freezes"]).rows ?? [] }
+    private func unfreeze(_ stat: ToolStat) {
+        guard let target = ToolsBridge.target(stat) else { return }
+        let reply = ToolsBridge.send(["action": "unfreeze", "target": target])
+        status = reply.message ?? ""; refreshFreezes()
     }
 
     private var consoleView: some View {
@@ -267,6 +330,7 @@ private struct StatEditor: View {
     @State private var value: String
     @State private var error: String?
     @State private var nickname = ""
+    @State private var frozen = false
     init(stat: ToolStat, gameID: UUID, onApplied: @escaping () -> Void) {
         self.stat = stat; self.gameID = gameID; self.onApplied = onApplied; _value = State(initialValue: stat.value)
     }
@@ -276,6 +340,14 @@ private struct StatEditor: View {
                 Section(header: Text("Variable")) {
                     Text(stat.label).font(.caption)
                     Text("Current: \(stat.value)").font(.system(.body, design: .monospaced))
+                    if frozen {
+                        Label("Frozen", systemImage: "snowflake").foregroundColor(.blue)
+                        Button("Unfreeze This Variable") {
+                            guard let target = ToolsBridge.target(stat) else { return }
+                            let reply = ToolsBridge.send(["action": "unfreeze", "target": target])
+                            if reply.ok { frozen = false; onApplied() } else { error = reply.message }
+                        }
+                    }
                 }
                 Section(header: Text("New value")) {
                     if stat.type == "bool" {
@@ -316,5 +388,8 @@ private struct StatEditor: View {
                 }
             }
         }.navigationViewStyle(StackNavigationViewStyle())
+        .onAppear {
+            if let target = ToolsBridge.target(stat) { frozen = ToolsBridge.send(["action": "read", "target": target]).rows?.first?.frozen == true }
+        }
     }
 }

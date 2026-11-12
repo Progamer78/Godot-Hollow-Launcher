@@ -1,0 +1,27 @@
+# Hollow polish update - November 11, 2026
+
+This is a changed-files update over GodotPlayer-EXE-Controller-Update-Fixed2. Copy every included path over the existing repository. No removals are required. The Actions workflow retains its existing name and unsigned IPA artifact name.
+
+The display name, original opaque portal icon, adaptive teal colors, library header, empty states, favorites/sorting/filtering, primary Play action, settings/help and acknowledgements now use Godot Hollow Launcher. The bundle identifier and original storage directories are retained. Import cancellation is silent; stale picker state is cleared. Imports show progress stages and check available storage. File/cache enumeration is moved off the UI thread.
+
+ZIP imports now use EXEs inside the archive for validated Godot 3 encrypted-script recovery. The same independent PCK bytes are installed. Matching candidates are preferred, other candidates are bounded and validated cryptographically, and extracted EXEs are removed. Native model regressions cover matching, mismatched and missing companions and key reuse.
+
+Game deletion asks before removing assets, saves and backups. Files are staged first and restored if manifest persistence fails. A previous validated manifest is maintained; recovery preserves an unreadable primary index and informs the user. Tests cover that recovery and deletion rollback. Recovery cannot reconstruct metadata newer than the previous index.
+
+Small text saves have a native monospaced editor, JSON formatting, automatic pre-edit backup, JSON syntax validation, stale-write rejection, atomic writes and discard confirmation. Smart quotes/corrections are disabled. The model tests cover 64-bit integer formatting, invalid JSON, stale edits, traversal/binary refusal and restoration of the original bytes. Human readability still depends on the game's file format and variable names.
+
+Touch Gestures offers Second-finger click: Off, Left Click or Right Click. Choosing it enables trackpad mode and converts floating sticks to fixed to free the touch area. The primary touch remains the pointer driver; secondary taps click at the existing pointer. Other multi-finger recognizers are disabled while this mode is active. These settings migrate as optional fields. The simulator checks recognizer priority; actual multitouch delivery needs a device.
+
+Settings & Help and the in-game menu offer an optional performance HUD. Metrics come from the real engine status bridge once per second: FPS, 1000/FPS average interval, process/physics monitor times and available engine allocation memory. Engine allocation memory is not total resident app memory and may be absent in release configurations. Thermal messages use iOS thermal state. The HUD has four corner choices and never intercepts taps. Both native engines compiled and passed 94 checks each, including metric fields and interval consistency.
+
+Local verification: 23 Python/native helper tests pass, both complete Windows runtimes compile and execute the original tools proof PCKs (188 checks), 27 Swift files parse with no direct local redeclarations, Python/workflow syntax checks pass, and Godot renders the opaque 1024px SVG icon. No original third-party executable was run and no encryption keys are included in this update.
+
+Pending Apple verification: the expanded model suite (actual CommonCrypto ZIP recovery, save editing/recovery), iPhone Swift type-checking, simulator tests, final archive/IPA, and all new device UI/controller/gesture behavior. Windows cannot verify these. No new IPA was produced locally.
+
+Before public distribution, run Actions and test on iPhone: existing library/saves survive the update; independent Godot 3/4 PCKs launch; ZIP EXE/PCK import succeeds or has an actionable mismatch error; save edits can be restored; deletion asks; both click buttons work while the pointer finger stays down; ordinary gestures return when second-finger click is off; controller remapping and sticks release on background/disconnect; HUD updates and passes taps; portrait/landscape, dark/light appearance and large text remain usable. The build does not add full-process save states or claim universal game compatibility.
+
+Find now accepts an optional variable-name/path filter before its result limit, supports boolean True/False searches and Changed/Unchanged refinement, and rejects malformed numeric input. The pinned monitor saves a selection of up to five pins per game and reads cached live references once per second, resolving at most one missing reference each tick. Both numeric and boolean values are supported; unavailable or ambiguous references are labelled instead of guessed. It does not apply or freeze the pinned edit value.
+
+Actions now restores and saves bounded SCons compiler caches for both engines, keyed by Apple compiler/SDK, architecture and Spine variant. Content signatures invalidate changed inputs. The first run remains a cold build; no measured speedup is claimed yet. A workflow input can disable cache reuse for diagnostics.
+
+Frozen variables now have a runtime-derived Frozen indicator in scans, Find, the variable editor, Pins and the live monitor. Pins lists all active freezes, including unpinned variables, with held values and individual Unfreeze actions. Stale references are removed. Fresh scan paths are compared by fields to fix Godot 3 container identity causing duplicate or unrecognized freezes. Both engines execute regressions for detection, fresh-path replacement, individual release and stale type cleanup.

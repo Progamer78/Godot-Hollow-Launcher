@@ -268,3 +268,131 @@ do {
     require(editedPins.games[0].savedCheats?[0].value == "9223372036854775807","Editing a pinned value persists exact integer text")
 }
 print("Original EXE key discovery, real AES validation, multiple sticks and controller profile persistence passed")
+
+do {
+    let folder = URL(fileURLWithPath: "build/archive-tests")
+    let zip = temporary.appendingPathComponent("encrypted-game.zip")
+    let pack = folder.appendingPathComponent("encrypted-fixture.pck")
+    let executable = folder.appendingPathComponent("original-fixture.exe")
+    var wrong = try Data(contentsOf: executable)
+    wrong.replaceSubrange(0x800..<0x820, with: Data(repeating: 0, count: 32))
+    let unrelated = temporary.appendingPathComponent("unrelated.exe")
+    try wrong.write(to: unrelated)
+    try GPArchive.create(zip.path, files: [pack.path, unrelated.path, executable.path], names: ["download/game.pck", "download/a.exe", "download/z.EXE"])
+    let prepared = temporary.appendingPathComponent("zip-game.pck")
+    let note = try PackageImport.prepare(zip, destination: prepared)
+    let imported = try PackageImport.inspectPrepared(prepared, source: zip, note: note)
+    require(imported.key == Data((0..<32).map { UInt8($0) }) && imported.pack.encryptedScriptCount == 1, "ZIP import must skip a mismatched EXE and recover from the matching original EXE")
+    require(imported.note?.contains("EXE found in ZIP") == true, "ZIP key recovery must be visible in import metadata")
+    let copied = try Data(contentsOf: prepared)
+    let original = try Data(contentsOf: pack)
+    require(copied == original, "ZIP recovery must not rewrite game data")
+    let leftovers = try FileManager.default.contentsOfDirectory(atPath: temporary.path).filter { $0.hasPrefix("original-") }
+    require(leftovers.isEmpty, "Candidate executables must be removed after ZIP inspection")
+    let noEXE = temporary.appendingPathComponent("missing-exe.zip")
+    try GPArchive.create(noEXE.path, files: [pack.path], names: ["nested/game.pck"])
+    do { _ = try PackageImport.inspectPrepared(prepared, source: noEXE, note: nil); fatalError("Encrypted ZIP without an EXE accepted") }
+    catch { require(error.localizedDescription.contains("ZIP") && error.localizedDescription.contains("EXE"), "Missing ZIP companion must have an actionable error") }
+    let retained = try PackageImport.inspectPrepared(prepared, source: noEXE, note: nil, existingKey: imported.key)
+    require(retained.key == imported.key, "Replacing an encrypted game may reuse its validated private key")
+    let mismatch = temporary.appendingPathComponent("mismatch.zip")
+    try GPArchive.create(mismatch.path, files: [pack.path, unrelated.path], names: ["game.pck", "game.exe"])
+    do { _ = try PackageImport.inspectPrepared(prepared, source: mismatch, note: nil); fatalError("Mismatched ZIP pair accepted") }
+    catch { require(error.localizedDescription.contains("No matching script key"), "Mismatched ZIP pair must be refused") }
+}
+print("ZIP-contained EXE/PCK recovery, wrong/missing companion rejection and original byte preservation passed")
+
+do {
+    let identity = UUID(), base = temporary.appendingPathComponent("TextSaves")
+    let gameFolder = base.appendingPathComponent(identity.uuidString)
+    try FileManager.default.createDirectory(at: gameFolder, withIntermediateDirectories: true)
+    let file = gameFolder.appendingPathComponent("stats.json")
+    let original = "{\"money\":10,\"large\":9223372036854775807}"
+    try Data(original.utf8).write(to: file)
+    let vault = SaveVault(root: temporary.appendingPathComponent("TextBackups"), saves: base)
+    let formatted = try SaveTextFormat.json(original)
+    require(formatted.contains("\n") && formatted.contains("9223372036854775807"), "Pretty printing must retain full 64-bit integers")
+    let changed = "{\"money\":999,\"large\":9223372036854775807}"
+    try vault.edit(identity, name: "stats.json", original: original, text: changed)
+    let edited = try vault.preview(identity, name: "stats.json")
+    let snapshots = try vault.snapshots(identity)
+    require(edited == changed && snapshots.count == 1, "Text editing must write exact bytes and back up first")
+    do { try vault.edit(identity, name: "stats.json", original: changed, text: "{broken"); fatalError("Invalid JSON accepted") } catch {}
+    let afterInvalid = try vault.preview(identity, name: "stats.json")
+    require(afterInvalid == changed, "Invalid JSON must leave the original save untouched")
+    do { try vault.edit(identity, name: "stats.json", original: original, text: original); fatalError("Stale save edit accepted") } catch {}
+    let beforeRestore = try vault.preview(identity, name: "stats.json")
+    require(beforeRestore == changed, "Stale edits must not overwrite newer progress")
+    try vault.restore(identity, snapshot: snapshots[0])
+    let restored = try vault.preview(identity, name: "stats.json")
+    require(restored == original, "The automatic pre-edit backup must restore the original save")
+    try Data([0,1,2]).write(to: gameFolder.appendingPathComponent("state.sav"))
+    do { try vault.edit(identity, name: "state.sav", original: "", text: "new"); fatalError("Binary save edited") } catch {}
+    do { try vault.edit(identity, name: "../stats.json", original: "", text: "new"); fatalError("Save traversal accepted") } catch {}
+}
+print("Text save editing, JSON validation/formatting, stale-write rejection and backup restore passed")
+
+do {
+    let storage = temporary.appendingPathComponent("RecoveryLibrary"), saves = temporary.appendingPathComponent("RecoverySaves")
+    let library = GameLibrary(storageRoot: storage, savesRoot: saves)
+    var first = Game(id: UUID(), name: "Alpha", pack: pack)
+    first.collection = "RPG"; first.lastPlayed = Date(timeIntervalSince1970: 10)
+    var second = Game(id: UUID(), name: "Beta", pack: pack)
+    second.favorite = true; second.lastPlayed = Date(timeIntervalSince1970: 20)
+    try library.persist([first, second])
+    require(LibraryQuery.games(library.games, search: " rpg ", collection: "", favoritesOnly: false, sort: .name).map(\.id) == [first.id], "Search must trim whitespace and include collections")
+    require(LibraryQuery.games(library.games, search: "", collection: "", favoritesOnly: true, sort: .recent).map(\.id) == [second.id], "Favorite filtering must retain only favorites")
+    require(LibraryQuery.games(library.games, search: "", collection: "", favoritesOnly: false, sort: .recent).map(\.id) == [second.id, first.id], "Recent sort must reflect play time")
+    second.name = "Newest edit"; library.update(second)
+    try Data("broken library index".utf8).write(to: storage.appendingPathComponent("library.json"))
+    let recovered = GameLibrary(storageRoot: storage, savesRoot: saves)
+    require(!recovered.readOnly && recovered.notice != nil && recovered.games.map(\.name) == ["Alpha", "Beta"], "A corrupt manifest must recover its previous valid copy without deleting game files")
+    let unreadable = try FileManager.default.contentsOfDirectory(atPath: storage.path).filter { $0.hasPrefix("library-unreadable-") }
+    require(unreadable.count == 1, "The unreadable manifest must be preserved during recovery")
+    try FileManager.default.createDirectory(at: recovered.directory(first.id), withIntermediateDirectories: true)
+    try Data("pack fixture".utf8).write(to: recovered.packURL(first))
+    let saveFolder = recovered.saveURL(first)
+    try FileManager.default.createDirectory(at: saveFolder, withIntermediateDirectories: true)
+    let saveFile = saveFolder.appendingPathComponent("progress.txt")
+    try Data("keep progress".utf8).write(to: saveFile)
+    _ = try recovered.vault.backup(first.id, label: "Manual backup")
+    let manifest = storage.appendingPathComponent("library.json")
+    let manifestBytes = try Data(contentsOf: manifest)
+    try FileManager.default.removeItem(at: manifest)
+    try FileManager.default.createDirectory(at: manifest, withIntermediateDirectories: false)
+    recovered.delete(first)
+    require(recovered.games.count == 2 && FileManager.default.fileExists(atPath: recovered.packURL(first).path) && FileManager.default.fileExists(atPath: saveFile.path), "Failed manifest persistence must roll back game/save deletion")
+    try FileManager.default.removeItem(at: manifest)
+    try manifestBytes.write(to: manifest)
+    recovered.delete(first)
+    require(recovered.games.map(\.id) == [second.id] && !FileManager.default.fileExists(atPath: saveFolder.path), "Confirmed deletion must remove the selected game and its saves")
+    let remaining = try recovered.vault.snapshots(first.id)
+    require(remaining.isEmpty, "Confirmed deletion must also remove that game's backups")
+    let backup = try JSONDecoder().decode([Game].self, from: Data(contentsOf: storage.appendingPathComponent("library.previous.json")))
+    require(backup.map(\.id) == [second.id], "Manifest recovery must not resurrect a deliberately deleted game")
+    var controls = ControlProfile.legacy(directions: "arrows", extras: "")
+    var one = JoystickControl(); one.mode = "floating"; one.identifier = UUID()
+    var two = one; two.identifier = UUID()
+    controls.joystick = one; controls.additionalJoysticks = [two]
+    controls.setMouseEnabled(true); controls.constrain()
+    require(controls.mouseEnabled && controls.sticks.allSatisfy { $0.mode == "fixed" }, "Enabling touch mouse must convert every floating stick, not only the first")
+}
+print("Library recovery, filtering/sorting, deletion rollback and multi-stick mouse transition passed")
+
+do {
+    var gestures = TouchGestures()
+    gestures.secondFingerClick = "right"; gestures.constrain()
+    let decoded = try JSONDecoder().decode(TouchGestures.self, from: JSONEncoder().encode(gestures))
+    require(decoded.secondFingerButton == 2, "Second-finger right click persists")
+    gestures.secondFingerClick = "left"; gestures.constrain()
+    require(gestures.secondFingerButton == 1, "Second-finger left click is supported")
+    gestures.secondFingerClick = "unknown"; gestures.constrain()
+    require(gestures.secondFingerButton == nil, "Unknown second-finger modes normalize to off")
+    let status = try JSONDecoder().decode(ToolReply.self, from: Data("{\"ok\":true,\"fps\":60,\"frameMs\":16.6667,\"processMs\":2,\"physicsMs\":1,\"engineMemoryBytes\":1048576}".utf8))
+    require(status.fps == 60 && status.engineMemoryBytes == 1_048_576 && status.processMs == 2, "Performance HUD decodes typed runtime metrics")
+    let oldPin = try JSONDecoder().decode(SavedCheat.self, from: Data("{\"id\":\"00000000-0000-0000-0000-000000000001\",\"name\":\"Money\",\"label\":\"/root/Game.money\",\"type\":\"int\",\"value\":\"99\"}".utf8))
+    require(oldPin.monitored == nil, "Existing pins migrate with the monitor off")
+    var watchedPin = oldPin; watchedPin.monitored = true
+    let watchedAgain = try JSONDecoder().decode(SavedCheat.self, from: JSONEncoder().encode(watchedPin))
+    require(watchedAgain.monitored == true && watchedAgain.value == "99", "Monitor selection persists without changing the pinned edit value")
+}

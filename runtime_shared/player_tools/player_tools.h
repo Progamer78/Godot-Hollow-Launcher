@@ -22,6 +22,8 @@ class PlayerTools : public PlayerToolsBase {
     Array frozen;
     Array number_candidates;
     bool numeric_only = false;
+    bool boolean_only = false;
+    String candidate_kind = "number";
     int virtual_pad = -1;
     int original_fps = -1;
     bool owns_pause = false;
@@ -46,6 +48,7 @@ class PlayerTools : public PlayerToolsBase {
     Dictionary input(const Dictionary &command);
     Dictionary options(const Dictionary &command);
     Dictionary find_numbers(const Dictionary &command);
+    bool is_frozen(const Dictionary &target) const;
     static Dictionary failure(const String &message);
     static SceneTree *tree();
 

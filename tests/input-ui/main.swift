@@ -97,6 +97,12 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
         let positionsBefore = PlayerRuntime.cursorPositionReads
         let visibilityBefore = PlayerRuntime.cursorVisibilityReads
         mouse.updateCursor()
+        var gestures = TouchGestures(); gestures.enabled = true; gestures.secondFingerClick = "right"
+        mouse.configureGestures(gestures)
+        check(mouse.gestureRecognizers?.allSatisfy { !$0.isEnabled } == true, "Second-finger click must disable conflicting recognizers without intercepting the pointer")
+        gestures.secondFingerClick = nil
+        mouse.configureGestures(gestures)
+        check(mouse.gestureRecognizers?.contains { $0.isEnabled } == true, "Ordinary trackpad gestures resume when second-finger click is off")
         check(PlayerRuntime.cursorPolls == before + 1 && PlayerRuntime.cursorPositionReads == positionsBefore + 1 && PlayerRuntime.cursorVisibilityReads == visibilityBefore + 1, "Cursor updater reads revision, position and visibility")
         check(mouse.subviews.first?.frame.origin == CGPoint(x: 20, y: 20) && mouse.subviews.first?.isHidden == false, "Cursor updater applies the game position and visibility to the view")
         print("PLAYER_INPUT_UI_CHECK: cursor state and view update PASS")

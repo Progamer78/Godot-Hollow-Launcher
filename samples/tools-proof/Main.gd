@@ -41,6 +41,10 @@ func edit(suffix, value):
 func run_checks():
     tools = ClassDB.call("instantiate", "PlayerTools")
     check(tools != null, "native tools class exists in release template")
+    var performance = tools.request({"action": "status"})
+    check(performance.ok and performance.fps >= 0 and performance.frameMs >= 0, "performance HUD has numeric FPS and frame interval")
+    check(performance.processMs >= 0 and performance.physicsMs >= 0 and performance.engineMemoryBytes >= 0, "performance monitors return nonnegative runtime measurements")
+    check((performance.fps == 0 and performance.frameMs == 0) or abs(performance.fps * performance.frameMs - 1000.0) < 0.01, "frame interval is consistent with observed FPS")
     stats_resource = load("res://Stats.gd").new()
     edit(".money", "999")
     check(money == 999, "script integer changed")
@@ -103,6 +107,10 @@ func run_checks():
     candidates = tools.request({"action": "refine_numbers", "comparison": "increased"})
     check(candidates.rows.size() == 1 and candidates.rows[0].value == "51", "numeric search narrows by increase")
     check(tools.request({"action": "freeze", "target": candidates.rows[0], "value": "60"}).ok, "freeze initial edit succeeds")
+    check(tools.request({"action":"read","target":candidates.rows[0]}).rows[0].frozen, "live reads report an active freeze")
+    check(tools.request({"action":"scan","search":candidates.rows[0].label}).rows[0].frozen, "stat scans identify frozen variables")
+    var active_freezes = tools.request({"action":"freezes"})
+    check(active_freezes.ok and active_freezes.rows.size() == 1 and active_freezes.rows[0].value == "60", "active freeze list reports the held value")
     money = 1
     tools.request({"action": "tick"})
     check(money == 60, "freeze tick restores desired value")
@@ -115,10 +123,44 @@ func run_checks():
         if not tools.request({"action":"freeze","target":candidates.rows[0],"value":"70"}).ok:
             reused_freeze_slot = false
     check(reused_freeze_slot, "editing a pinned freeze reuses its slot instead of hitting the 20-freeze limit")
+    var rescanned_target = tools.request({"action":"scan","search":candidates.rows[0].label}).rows[0]
+    check(tools.request({"action":"freeze","target":rescanned_target,"value":"70"}).ok and tools.request({"action":"freezes"}).rows.size() == 1, "fresh scan freeze reuses the existing slot on both engines")
+    check(tools.request({"action":"unfreeze","target":rescanned_target}).ok and tools.request({"action":"freezes"}).rows.size() == 0, "individual unfreeze resolves a fresh scan's path")
+    money = 4
+    tools.request({"action":"tick"})
+    check(money == 4 and not tools.request({"action":"read","target":candidates.rows[0]}).rows[0].frozen, "released variable no longer reports frozen or receives writes")
+    tools.request({"action":"freeze","target":candidates.rows[0],"value":"70"})
+    money = "type changed"
+    check(tools.request({"action":"freezes"}).rows.size() == 0, "stale freezes disappear when the variable changes type")
     tools.request({"action": "clear_freezes"})
     money = 2
     tools.request({"action": "tick"})
     check(money == 2, "cleared freeze stops writing")
+    player_flag = false
+    var boolean_search = tools.request({"action":"find_numbers","kind":"bool","comparison":"exact","value":"false","search":"player_flag"})
+    check(boolean_search.ok and boolean_search.rows.size() == 1 and boolean_search.rows[0].type == "bool", "boolean search matches false and a variable-name filter")
+    player_flag = true
+    boolean_search = tools.request({"action":"refine_numbers","kind":"bool","comparison":"changed","search":"PLAYER_FLAG"})
+    check(boolean_search.ok and boolean_search.rows.size() == 1 and boolean_search.rows[0].value == "true", "boolean search narrows changed values with case-insensitive names")
+    check(tools.request({"action":"edit","target":boolean_search.rows[0],"value":"false"}).ok and player_flag == false, "boolean search results can be edited")
+    boolean_search = tools.request({"action":"refine_numbers","kind":"bool","comparison":"unchanged"})
+    check(boolean_search.rows.size() == 0, "boolean unchanged comparison drops edited values")
+    check(not tools.request({"action":"find_numbers","kind":"bool","comparison":"increased"}).ok, "boolean search rejects numeric-only comparisons")
+    money = 55
+    var named_numbers = tools.request({"action":"find_numbers","comparison":"any","search":"money"})
+    var names_match = named_numbers.rows.size() > 0
+    for match_row in named_numbers.rows:
+        names_match = names_match and match_row.label.to_lower().find("money") >= 0
+    check(names_match, "numeric search applies variable names before the candidate limit")
+    named_numbers = tools.request({"action":"refine_numbers","comparison":"any","search":"stats_resource.money"})
+    check(named_numbers.rows.size() == 1 and named_numbers.rows[0].label.find("stats_resource.money") >= 0, "existing numeric candidates can be narrowed by variable path")
+    check(not tools.request({"action":"find_numbers","comparison":"exact","value":"not a number"}).ok, "invalid numeric exact searches are refused")
+    var monitor_target = target(".player_flag")
+    var monitored = tools.request({"action":"read","target":monitor_target})
+    check(monitored.ok and monitored.rows[0].value == "false", "pinned monitor reads booleans without editing them")
+    player_flag = true
+    monitored = tools.request({"action":"read","target":monitor_target})
+    check(monitored.ok and monitored.rows[0].value == "true", "cached pinned target returns the current live value")
     var fps_property = "max_fps" if Engine.get_version_info().major >= 4 else "target_fps"
     var previous_fps = Engine.get(fps_property)
     check(tools.request({"action": "options", "fps": 30}).ok and Engine.get(fps_property) == 30, "frame cap changes actual engine setting")

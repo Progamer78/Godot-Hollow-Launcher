@@ -307,6 +307,9 @@ class BuildToolsTests(unittest.TestCase):
             self.assertEqual(archive_flags[0][-2:], ["-fno-modules", "-fno-cxx-modules"])
             self.assertIn(("PlayerRuntime.mm", ["-fmodules", "-fcxx-modules"]), graph)
             self.assertIn(("*.swift", ["-fmodules", "-fcxx-modules"]), graph)
+            swift_targets = (target / "platform_methods.py").read_text()
+            self.assertIn('target_suffix = "ios15.0"', swift_targets)
+            self.assertIn('target_suffix = "ios15.0-simulator"', swift_targets)
             service = (target / names[1]).read_text()
             self.assertIn("startPlayerWithArguments:", service)
             self.assertNotIn("exit(0)", service)
@@ -366,6 +369,7 @@ class BuildToolsTests(unittest.TestCase):
             self.assertEqual(runtime.read_bytes(), library.read_bytes())
             data = plistlib.loads(info.read_bytes())
             self.assertTrue(data["UIFileSharingEnabled"])
+            self.assertEqual(data["CFBundleDisplayName"], "Godot Hollow Launcher")
             self.assertEqual(data["MinimumOSVersion"], "15.0")
             declared = {item["UTTypeIdentifier"] for item in data["UTImportedTypeDeclarations"]}
             self.assertTrue({"org.godotengine.pck", "org.godotplayer.apk", "org.godotplayer.embedded-pack"}.issubset(declared))
@@ -382,7 +386,8 @@ class BuildToolsTests(unittest.TestCase):
             self.assertIn("Preserved notice", (app / "en.lproj/InfoPlist.strings").read_text())
             compatibility_notice = export / "limbo-license.txt"
             compatibility_notice.write_text("LimboAI MIT notice", encoding="utf-8")
-            module("prepare_xcode").prepare(export, library, notice, compatibility_notice)
+            module("prepare_xcode").prepare(export, library, notice, compatibility_notice, "4.2")
+            self.assertEqual(plistlib.loads(info.read_bytes())["HollowSpineRuntime"], "4.2")
             self.assertIn("LimboAI MIT notice", (app / "en.lproj/InfoPlist.strings").read_text())
             notice.write_text("", encoding="utf-8")
             with self.assertRaises(RuntimeError):

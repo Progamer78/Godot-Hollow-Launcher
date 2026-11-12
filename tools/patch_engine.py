@@ -4,7 +4,7 @@ import argparse
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH_REVISION = "exe-key-controller-multitouch-v10"
+PATCH_REVISION = "hollow-release-zip-save-edit-v11"
 
 
 def replace(path, old, new):
@@ -44,6 +44,10 @@ def patch(engine):
     # Match the exported Xcode target's Swift language mode. These launcher
     # sources use explicit dispatch queues and do not require Swift 6 isolation.
     replace(engine / "platform_methods.py", '"-swift-version",\n        "6",', '"-swift-version",\n        "5",')
+    # The exported player requires iOS 15. Match the Swift module target so
+    # supported iOS 15 controls are available in both preflight and SCons.
+    replace(engine / "platform_methods.py", 'target_suffix = "ios14.0"', 'target_suffix = "ios15.0"')
+    replace(engine / "platform_methods.py", 'target_suffix = "ios14.0-simulator"', 'target_suffix = "ios15.0-simulator"')
 
     service = apple / "app_delegate_service.mm"
     replace(service, "int gargc;", "extern BOOL player_engine_ready;\nint gargc;")

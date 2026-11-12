@@ -2,6 +2,7 @@
 #include "core/math/expression.h"
 #include "core/io/json.h"
 #include "core/os/os.h"
+#include "main/performance.h"
 #include <cerrno>
 #include <cstdlib>
 #if VERSION_MAJOR >= 4
@@ -83,12 +84,13 @@ void PlayerTools::scan_value(Object *owner, const Variant &value, const Array &p
     String type = scalar_type(value);
     if (!is_empty_text(type)) {
         if (numeric_only && type != "int" && type != "float") return;
+        if (boolean_only && type != "bool") return;
         if (!is_empty_text(filter) && label.to_lower().find(filter) < 0) return;
         // Avoid flooding the editor with narrative text or save blobs.
         String display = type == "bool" ? (bool(value) ? "true" : "false") : String(value);
         if (display.length() > 512) return;
         Dictionary row; row["object"] = object_id(owner); row["path"] = path;
-        row["label"] = label; row["type"] = type; row["value"] = display;
+        row["label"] = label; row["type"] = type; row["value"] = display; row["frozen"] = is_frozen(row);
         rows.push_back(row); return;
     }
     if (depth >= 5) return;
@@ -321,6 +323,28 @@ Dictionary PlayerTools::evaluate(const String &code) {
     Dictionary result; result["ok"] = true; result["message"] = String(value).substr(0, 4096); return result;
 }
 
+static bool same_target(const Dictionary &left, const Dictionary &right) {
+    if (left.get("object", Variant()) != right.get("object", Variant())) return false;
+    Array left_path = left.get("path", Array()), right_path = right.get("path", Array());
+    if (left_path.size() != right_path.size() || left_path.size() == 0) return false;
+    // Godot 3 container equality compares identity. A fresh scan constructs new
+    // path arrays, so compare each supported step's fields explicitly.
+    for (int i = 0; i < left_path.size(); i++) {
+        if (left_path[i].get_type() != Variant::DICTIONARY || right_path[i].get_type() != Variant::DICTIONARY) return false;
+        Dictionary a = left_path[i], b = right_path[i];
+        if (a.get("kind", Variant()) != b.get("kind", Variant()) || a.get("name", Variant()) != b.get("name", Variant()) || a.get("index", Variant()) != b.get("index", Variant())) return false;
+    }
+    return true;
+}
+
+bool PlayerTools::is_frozen(const Dictionary &target) const {
+    for (int i = 0; i < frozen.size(); i++) {
+        Dictionary entry = frozen[i], prior = entry.get("target", Dictionary());
+        if (same_target(prior, target) && prior.get("type", Variant()) == target.get("type", Variant())) return true;
+    }
+    return false;
+}
+
 Dictionary PlayerTools::request(const Dictionary &command) {
     String action = command.get("action", "scan");
     if (action == "objects") {
@@ -336,6 +360,40 @@ Dictionary PlayerTools::request(const Dictionary &command) {
         Dictionary result; result["ok"] = true; result["rows"] = objects; result["truncated"] = pending.size() > 200; result["undoCount"] = history.size(); return result;
     }
     if (action == "scan") return scan(command.get("search", ""));
+    if (action == "read") {
+        Dictionary target = command.get("target", Dictionary()); Object *owner = nullptr; Array path; Variant value; String error;
+        if (!resolve(target, owner, path, value, error)) return failure(error);
+        Node *node = Object::cast_to<Node>(owner);
+        if (node && !node->is_inside_tree()) return failure("This object left the active scene.");
+        if (is_empty_text(scalar_type(value))) return failure("This value cannot be monitored.");
+        String display = value.get_type() == Variant::BOOL ? (bool(value) ? String("true") : String("false")) : String(value);
+        if (display.length() > 512) return failure("This value is too long to monitor.");
+        Dictionary row = target.duplicate(); row["value"] = display; row["frozen"] = is_frozen(row); Array values; values.push_back(row);
+        Dictionary result; result["ok"] = true; result["rows"] = values; return result;
+    }
+    if (action == "freezes") {
+        Array active, values;
+        for (int i = 0; i < frozen.size(); i++) {
+            Dictionary entry = frozen[i], target = entry.get("target", Dictionary());
+            Object *owner = nullptr; Array path; Variant value; String error;
+            if (!resolve(target, owner, path, value, error)) continue;
+            Node *node = Object::cast_to<Node>(owner);
+            if (node && !node->is_inside_tree()) continue;
+            active.push_back(entry);
+            Dictionary row = target.duplicate(); row["frozen"] = true; row["value"] = entry.get("value", ""); values.push_back(row);
+        }
+        frozen = active;
+        Dictionary result; result["ok"] = true; result["rows"] = values; return result;
+    }
+    if (action == "unfreeze") {
+        Dictionary target = command.get("target", Dictionary()); Array remaining;
+        for (int i = 0; i < frozen.size(); i++) {
+            Dictionary entry = frozen[i], prior = entry.get("target", Dictionary());
+            if (!same_target(prior, target)) remaining.push_back(entry);
+        }
+        frozen = remaining;
+        Dictionary result; result["ok"] = true; result["message"] = "Freeze released. The current value is unchanged."; return result;
+    }
     if (action == "edit") return edit(command);
     if (action == "undo") return undo();
     if (action == "pause") return pause(command.get("enabled", false));
@@ -348,11 +406,11 @@ Dictionary PlayerTools::request(const Dictionary &command) {
         Dictionary target=command.get("target",Dictionary());
         for(int i=0;i<frozen.size();i++) {
             Dictionary prior=frozen[i], old_target=prior.get("target",Dictionary());
-            if(old_target.get("object",Variant())==target.get("object",Variant()) && old_target.get("path",Variant())==target.get("path",Variant())) { existing=i; break; }
+            if(same_target(old_target,target)) { existing=i; break; }
         }
         if (existing < 0 && frozen.size() >= 20) return failure("Only 20 values can be frozen in one session.");
         Dictionary result = edit(command);
-        if (bool(result.get("ok", false))) { if(existing>=0) frozen[existing]=command; else frozen.push_back(command); }
+        if (bool(result.get("ok", false))) { if(existing>=0) frozen[existing]=command; else frozen.push_back(command); result["message"] = "Frozen. This value will be held while the app is active."; }
         return result;
     }
     if (action == "clear_freezes") { frozen.clear(); Dictionary result; result["ok"] = true; return result; }
@@ -394,6 +452,15 @@ Dictionary PlayerTools::options(const Dictionary &command) {
         engine->set_time_scale(speed);
     }
     Dictionary result; result["ok"] = true;
+    const double fps = engine->get_frames_per_second();
+    result["fps"] = fps > 0 && !Math::is_nan(fps) && !Math::is_inf(fps) ? fps : 0.0;
+    result["frameMs"] = fps > 0 && !Math::is_nan(fps) && !Math::is_inf(fps) ? 1000.0 / fps : 0.0;
+    Performance *performance = Performance::get_singleton();
+    if (performance) {
+        result["processMs"] = MAX(0.0, double(performance->get_monitor(Performance::TIME_PROCESS)) * 1000.0);
+        result["physicsMs"] = MAX(0.0, double(performance->get_monitor(Performance::TIME_PHYSICS_PROCESS)) * 1000.0);
+        result["engineMemoryBytes"] = MAX(0.0, double(performance->get_monitor(Performance::MEMORY_STATIC)));
+    }
     result["message"] = String("FPS: ") + itos(engine->get_frames_per_second()) + " | speed: " + String::num(engine->get_time_scale()) + " | scene: " + (tree() && tree()->get_current_scene() ? String(tree()->get_current_scene()->get_name()) : String("loading"));
     result["ready"] = tree() && tree()->get_current_scene();
     return result;
@@ -471,21 +538,36 @@ Dictionary PlayerTools::input(const Dictionary &command) {
 
 Dictionary PlayerTools::find_numbers(const Dictionary &command) {
     String action = command.get("action", "");
-    if (action == "find_numbers") {
-        numeric_only = true; scan(""); numeric_only = false;
-        number_candidates = rows.duplicate();
+    String kind = command.get("kind", action == "find_numbers" ? String("number") : candidate_kind);
+    if (kind != "number" && kind != "bool") return failure("Choose Number or Boolean.");
+    String comparison = command.get("comparison", "exact"), expected = String(command.get("value", "")).strip_edges();
+    String name_filter = String(command.get("search", "")).substr(0, 100).strip_edges().to_lower();
+    if (comparison != "any" && comparison != "exact" && comparison != "changed" && comparison != "unchanged" && comparison != "increased" && comparison != "decreased") return failure("Unknown search comparison.");
+    if (kind == "bool" && (comparison == "increased" || comparison == "decreased")) return failure("Booleans support Equals, Changed and Unchanged.");
+    if (comparison == "exact") {
+        if (kind == "bool") {
+            expected = expected.to_lower();
+            if (expected != "true" && expected != "false") return failure("Choose True or False.");
+        } else if (!expected.is_valid_float()) return failure("Enter a valid number before searching.");
     }
-    String comparison = command.get("comparison", "exact"), expected = command.get("value", "");
+    if (action == "find_numbers") {
+        numeric_only = kind == "number"; boolean_only = kind == "bool";
+        scan(name_filter); numeric_only = false; boolean_only = false;
+        number_candidates = rows.duplicate();
+        candidate_kind = kind;
+    } else if (kind != candidate_kind) return failure("Start a new search after changing the value type.");
     Array remaining;
     for (int i = 0; i < number_candidates.size(); i++) {
         Dictionary row = number_candidates[i]; Object *owner = nullptr; Array path; Variant value; String error;
         if (!resolve(row, owner, path, value, error)) continue;
-        String now = String(value), before = row["value"];
+        String label = row["label"];
+        if ((!is_empty_text(name_filter) && label.to_lower().find(name_filter) < 0) || scalar_type(value) != String(row["type"])) continue;
+        String now = value.get_type() == Variant::BOOL ? (bool(value) ? String("true") : String("false")) : String(value), before = row["value"];
         bool increased = false, decreased = false;
         if (value.get_type() == Variant::INT) {
             bool valid = false; int64_t old = parse_integer(before, valid);
             if (valid) { increased = int64_t(value) > old; decreased = int64_t(value) < old; }
-        } else {
+        } else if (kind == "number") {
 #if VERSION_MAJOR >= 4
             double old = before.to_float();
 #else
@@ -493,8 +575,21 @@ Dictionary PlayerTools::find_numbers(const Dictionary &command) {
 #endif
             increased = double(value) > old; decreased = double(value) < old;
         }
-        bool keep = comparison == "any" || (comparison == "exact" && now == expected.strip_edges()) || (comparison == "changed" && now != before) || (comparison == "unchanged" && now == before) || (comparison == "increased" && increased) || (comparison == "decreased" && decreased);
-        if (keep) { row["value"] = now; remaining.push_back(row); }
+        bool exact = now == expected;
+        if (kind == "number" && comparison == "exact") {
+            if (value.get_type() == Variant::INT) {
+                bool valid = false; int64_t number = parse_integer(expected, valid);
+                exact = valid && int64_t(value) == number;
+            } else {
+#if VERSION_MAJOR >= 4
+                exact = double(value) == expected.to_float();
+#else
+                exact = double(value) == expected.to_double();
+#endif
+            }
+        }
+        bool keep = comparison == "any" || (comparison == "exact" && exact) || (comparison == "changed" && now != before) || (comparison == "unchanged" && now == before) || (comparison == "increased" && increased) || (comparison == "decreased" && decreased);
+        if (keep) { row["value"] = now; row["frozen"] = is_frozen(row); remaining.push_back(row); }
     }
     number_candidates = remaining;
     Dictionary result; result["ok"] = true; result["rows"] = remaining; result["truncated"] = truncated; result["undoCount"] = history.size(); return result;

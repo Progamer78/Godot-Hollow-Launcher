@@ -15,8 +15,16 @@ struct PackInfo: Codable, Equatable {
 
 enum PackError: LocalizedError {
     case invalid(String)
+    case encryptedScripts(major: UInt32, count: Int, example: String)
     var errorDescription: String? {
-        switch self { case .invalid(let reason): return reason }
+        switch self {
+        case .invalid(let reason): return reason
+        case .encryptedScripts(let major, let count, let example):
+            let recovery = major == 3
+                ? "Select its original Godot 3 Windows x64 EXE together with the PCK, or import a ZIP containing both, to try automatic export encryption key recovery. Other encryption layouts require an unencrypted export."
+                : "This engine's export encryption key recovery is unsupported. Import an unencrypted export."
+            return "This Godot \(major) pack contains \(count) encrypted scripts, including \(example). \(recovery)"
+        }
     }
 }
 
@@ -97,10 +105,7 @@ enum PCKInspector {
         }
         guard hasProject else { throw PackError.invalid("No project settings found. This is a resource-only or incomplete pack.") }
         if encryptedScripts > 0 && (decryptScript == nil || major != 3) {
-            let recovery = major == 3
-                ? "Select its original Godot 3 Windows x64 EXE together with the PCK to try automatic export encryption key recovery. Other encryption layouts require an unencrypted export."
-                : "This engine's export encryption key recovery is unsupported. Import an unencrypted export."
-            throw PackError.invalid("This Godot \(major) pack contains \(encryptedScripts) encrypted scripts, including \(encryptedExample). \(recovery)")
+            throw PackError.encryptedScripts(major: major, count: encryptedScripts, example: encryptedExample)
         }
         var versions = Set<UInt32>()
         for (offset, length, path) in encryptedEntries {

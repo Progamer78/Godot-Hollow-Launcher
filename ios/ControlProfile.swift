@@ -106,6 +106,19 @@ struct ControlProfile: Codable, Equatable {
     var haptics: Bool?
 
     static let presetNames = ["Platformer", "RPG - WASD", "Analog gamepad", "Visual novel", "Mouse / trackpad"]
+    mutating func setMouseEnabled(_ enabled: Bool) {
+        mouseEnabled = enabled
+        if enabled {
+            if joystick?.mode == "floating" { joystick?.mode = "fixed" }
+            additionalJoysticks = additionalJoysticks.map { values in
+                values.map { value in
+                    var stick = value
+                    if stick.mode == "floating" { stick.mode = "fixed" }
+                    return stick
+                }
+            }
+        }
+    }
     static func preset(_ name: String) -> ControlProfile {
         var value = legacy(directions: name == "RPG - WASD" ? "wasd" : "arrows", extras: "Space,Shift")
         if name == "Analog gamepad" {
@@ -178,8 +191,11 @@ struct TouchGestures: Codable, Equatable {
     var twoFingerTap="Mouse Right"
     var threeFingerTap="Escape"
     var scroll=true
+    var secondFingerClick: String?
+    var secondFingerButton: Int? { secondFingerClick == "left" ? 1 : (secondFingerClick == "right" ? 2 : nil) }
     mutating func constrain() {
         twoFingerTap=String(twoFingerTap.prefix(32)); threeFingerTap=String(threeFingerTap.prefix(32))
+        if let click = secondFingerClick, !["left", "right"].contains(click) { secondFingerClick = nil }
     }
 }
 

@@ -19,6 +19,8 @@ enum SupportReport {
         }
         let report: [String: Any] = [
             "schema": 1, "created": ISO8601DateFormatter().string(from: Date()),
+            "app": "Godot Hollow Launcher", "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development",
+            "spineRuntime": Bundle.main.object(forInfoDictionaryKey: "HollowSpineRuntime") as? String ?? "unknown",
             "system": UIDevice.current.systemVersion, "deviceFamily": UIDevice.current.model,
             "engineMetadata": game.pack.version, "packFormat": game.pack.format,
             "compiledScripts": game.pack.scriptVersions ?? [], "nativeDescriptors": game.pack.nativeFiles ?? [],
@@ -28,7 +30,7 @@ enum SupportReport {
             "lastLaunchStatus": library.previousLaunch(game)?.status ?? "none", "diagnostics": diagnostics,
             "privacy": "No PCK, executable, save contents, library notes, or full log included. Review diagnostics before sharing."
         ]
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("GodotPlayer-support-\(UUID().uuidString).json")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Hollow-support-\(UUID().uuidString).json")
         try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
         return url
     }
