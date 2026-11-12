@@ -309,7 +309,7 @@ private struct SavedPinEditor: View {
                 TextField("Name",text:$pin.name)
                 Text(pin.label).font(.caption)
                 if pin.type == "bool" {
-                    Picker("Value",selection:$pin.value) { Text("True").tag("true"); Text("False").tag("false") }
+                    Picker("Value",selection:$pin.editorValue) { Text("True").tag("true"); Text("False").tag("false") }
                 } else { TextField("Pinned value",text:$pin.value).autocapitalization(.none).disableAutocorrection(true) }
                 Text("Save changes the reusable value. Apply sends it to the game; Freeze applies and holds it. To change an active freeze, use Freeze again after saving.").font(.caption)
             }.navigationTitle("Edit Pinned Value")

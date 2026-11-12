@@ -38,6 +38,10 @@ struct SavedCheat: Codable, Identifiable, Equatable {
     var type: String
     var value: String
     var monitored: Bool?
+    var editorValue: String {
+        get { type == "bool" ? value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() : value }
+        set { value = newValue }
+    }
     // A stable scene/resource label is resolved again each session. Instance
     // IDs are deliberately not persisted across process lifetimes.
 }

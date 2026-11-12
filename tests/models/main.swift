@@ -395,4 +395,8 @@ do {
     var watchedPin = oldPin; watchedPin.monitored = true
     let watchedAgain = try JSONDecoder().decode(SavedCheat.self, from: JSONEncoder().encode(watchedPin))
     require(watchedAgain.monitored == true && watchedAgain.value == "99", "Monitor selection persists without changing the pinned edit value")
+    var legacyBoolean = SavedCheat(name: "Flag", label: "/root/Game.flag", type: "bool", value: "True")
+    require(legacyBoolean.editorValue == "true" && legacyBoolean.value == "True", "Godot 3 capitalized boolean pins must have a valid picker selection without rewriting the saved pin")
+    legacyBoolean.editorValue = "false"
+    require(legacyBoolean.value == "false", "Editing a migrated boolean pin updates its reusable value")
 }
