@@ -1,8 +1,8 @@
 # Hollow release update - November 11, 2026
 
-Both complete Windows engines compiled and executed 94 checks each (188 total) in the original tools proof PCKs. New cases cover performance monitor fields, numeric name filters, invalid input rejection, boolean search/refinement/editing and pinned live reads. All 23 Python/native helper tests passed. All 27 Swift source/test files parsed, with no direct local redeclarations; Python AST, workflow YAML and all 18 shell blocks passed syntax checks. These checks do not replace an Apple SDK compile.
+Both complete Windows engines compiled and executed 94 checks each (188 total) in the original tools proof PCKs. New cases cover performance monitor fields, numeric name filters, invalid input rejection, boolean search/refinement/editing and pinned live reads. All 25 Python/native helper tests passed. All 27 Swift source/test files parsed, with no direct local redeclarations; Python AST, workflow YAML and all 18 shell blocks passed syntax checks. These checks do not replace an Apple SDK compile.
 
-The expanded Swift model suite, complete iPhone type-check, simulator input checks and final IPA are pending GitHub Actions. Physical device behavior remains untested for this update. See docs/hollow-release.md for the device checklist. No new IPA was produced locally on Windows.
+GitHub Actions passed the expanded Swift model suite, all 270 pack-inspector checks, the complete iPhone type-check, the iPhone archive-importer link check and actual UIKit simulator input checks. Both iPhone runtimes compiled and linked, the Xcode archive succeeded, and the final unsigned IPA passed the CI audit plus a second local audit after download. [Successful final Actions build](https://github.com/Progamer78/Godot-Hollow-Launcher/actions/runs/43149671399). Physical device behavior remains untested for this update. See docs/hollow-release.md for the device checklist. The simulator uses recorded engine endpoints and does not execute Godot. Engine build stages took 49s combined with cache reuse versus 481s cold; whole jobs took 338s and 751s respectively.
 
 # Validation recorded November 8, 2026
 

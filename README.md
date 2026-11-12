@@ -31,24 +31,22 @@ Small UTF-8 JSON, CFG, INI, TXT and CSV saves can be edited before Play. JSON ca
 
 ## Build and install
 
-The current changed-files update is in **build/checkpoints/Godot-Hollow-Launcher-Polish-Update**. Copy its contents over the existing repository, preserving paths, including `.github`. It contains only files added or changed since the previous Fixed2 update; no files need deleting.
-
-1. Open your repository on GitHub, select **Actions > Build native Godot Player > Run workflow**.
+1. Open your repository on GitHub, select **Actions > Build native Godot Player > Run workflow** and choose the branch containing this update.
 2. Keep Spine **4.2** for games with 4.2 assets. Choose 4.3 for games that require 4.3. One Spine version is bundled per build.
 3. Download **GodotPlayer-build-and-tests** after a successful run. It contains **GodotPlayer-unsigned.ipa**.
 4. Sign the application and its embedded **Godot3Runtime.framework** with your signing tool, then install. Keep the same app identity when updating to preserve your library and saves.
 
 The working official iOS export/Xcode pipeline is retained. The launcher and Swift module target iOS 15 or later. The display name is Godot Hollow Launcher; existing storage paths and bundle identifier are preserved.
 
-**Reuse engine compiler outputs** is enabled by default. The first build fills the cache; later builds can reuse unchanged engine objects. Disable it for a clean diagnostic build. Actual build time depends on the GitHub runner and cache availability.
+**Reuse engine compiler outputs** is enabled by default. The first build fills the cache; later builds can reuse unchanged engine objects. Disable it for a clean diagnostic build. In the observed final UI update, the whole job took 5m 38s with cache reuse versus 12m 31s for the cold build; engine build stages fell from 8m 1s to 49s combined. Actual time depends on the runner and cache availability. A new branch/compiler/SDK/Spine variant may need a cold build.
 
 ## Compatibility and verification
 
 A valid import is a compatibility candidate, not a guarantee of gameplay. Required native plugins, .NET, unsupported encryption, missing resources and engine/Spine version differences can prevent a game from running. See [compatibility](docs/compatibility.md).
 
-For this update, both Windows engine builds compiled and each executed **94 native checks (188 total)**, including performance metrics, boolean/name filtering and direct pinned-value reads. **23 Python/native helper tests pass**, and 27 Swift source/test files pass syntax parsing and a narrow local-declaration scan. The SVG icon was rendered by Godot at 1024 pixels with an opaque background.
+For this update, both Windows engine builds compiled and each executed **94 native checks (188 total)**, including performance metrics, boolean/name filtering and direct pinned-value reads. **25 Python/native helper tests pass**, and 27 Swift source/test files pass syntax parsing and a narrow local-declaration scan. The SVG icon was rendered by Godot at 1024 pixels with an opaque background.
 
-**The new Swift model cases, iOS UI/type-checking, physical second-finger input and final IPA need GitHub Actions/device validation. No new IPA was produced on this Windows host.** Earlier iPhone success reports apply to earlier builds. See [this update's verification and device checks](docs/hollow-release.md) and [recorded results](tests/results/validation.md).
+**GitHub Actions has passed 270 pack-inspector checks, the expanded Swift models, the complete iPhone type-check, the archive importer link check and actual UIKit input tests in an iPhone simulator.** Both iPhone engines compiled, the Xcode archive succeeded, and the unsigned IPA passed its ARM64/framework/packaging audit. [Final Actions build](https://github.com/Progamer78/Godot-Hollow-Launcher/actions/runs/43149671399). Physical second-finger input and new UI/controller behavior need device testing. Earlier iPhone success reports apply to earlier builds. See [this update's verification and device checks](docs/hollow-release.md) and [recorded results](tests/results/validation.md).
 
 Hollow is independent of the Godot Foundation. Godot and third-party notices are preserved and available in Settings & Help. Imported scripts share the app's sandbox; only import games you trust.
 
