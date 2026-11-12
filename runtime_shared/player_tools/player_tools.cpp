@@ -383,7 +383,7 @@ Dictionary PlayerTools::request(const Dictionary &command) {
     if (action == "cancel_search") { search_busy = false; discovery_tasks.clear(); working_candidates.clear(); working_locations.clear(); discovery_seen.clear(); return search_results(); }
     if (action == "reset_search") {
         search_busy = false; discovery_tasks.clear(); working_candidates.clear(); working_locations.clear(); discovery_seen.clear(); result_page = 0;
-        number_candidates.clear(); candidate_locations.clear(); search_history.clear(); search_started = false; search_steps = 0; candidate_truncated = false;
+        number_candidates.clear(); candidate_locations.clear(); search_history.clear(); search_started = false; search_steps = 0; candidate_truncated = false; candidate_present_types = 0;
         return search_results();
     }
     if (action == "undo_search") {
@@ -391,7 +391,7 @@ Dictionary PlayerTools::request(const Dictionary &command) {
         result_page = 0;
         if (search_history.size() == 0) return failure("There is no earlier refinement to restore.");
         SearchSnapshot previous = search_history[search_history.size() - 1]; search_history.resize(search_history.size() - 1);
-        number_candidates = previous.candidates; candidate_filter = previous.filter; candidate_kind = previous.kind; search_steps = previous.steps;
+        number_candidates = previous.candidates; candidate_filter = previous.filter; candidate_kind = previous.kind; search_steps = previous.steps; candidate_present_types = previous.types;
         return search_results();
     }
     if (action == "read") {
@@ -646,6 +646,7 @@ void PlayerTools::collect_indexed(const IndexedValue &candidate, const Variant &
     if (working_candidates.size() >= 250000) { working_truncated = true; return; }
     IndexedValue current = candidate; current.before = value;
     working_candidates.push_back(current);
+    working_present_types |= 1 << int(value.get_type());
 }
 
 Dictionary PlayerTools::find_numbers(const Dictionary &command) {
@@ -670,7 +671,7 @@ Dictionary PlayerTools::find_numbers(const Dictionary &command) {
         Dictionary task; task["object"] = object_id(root); task["label"] = String(root->get_path()); task["depth"] = 0;
         discovery_tasks.push_back(task);
     } else working_locations = candidate_locations;
-    working_candidates.clear(); working_index = 0; working_examined = 0;
+    working_candidates.clear(); working_index = 0; working_examined = 0; working_present_types = 0;
     working_kind = kind; working_filter = String(command.get("search", "")).substr(0, 100).strip_edges().to_lower();
     working_scope = scope; working_comparison = comparison; working_expected = expected;
     working_name_spans = working_filter.find(".") >= 0 || working_filter.find("/") >= 0 || working_filter.find("[") >= 0;
@@ -804,7 +805,7 @@ Dictionary PlayerTools::continue_search(bool progress_only) {
     if (complete) {
         if (search_discovery) { search_history.clear(); search_steps = 0; }
         else {
-            SearchSnapshot previous; previous.candidates = number_candidates; previous.filter = candidate_filter; previous.kind = candidate_kind; previous.steps = search_steps;
+            SearchSnapshot previous; previous.candidates = number_candidates; previous.filter = candidate_filter; previous.kind = candidate_kind; previous.steps = search_steps; previous.types = candidate_present_types;
             search_history.push_back(previous); search_steps++;
             int history_rows = 0;
             for (int i = 0; i < search_history.size(); i++) history_rows += search_history[i].candidates.size();
@@ -816,6 +817,7 @@ Dictionary PlayerTools::continue_search(bool progress_only) {
         }
         number_candidates = working_candidates; working_candidates = Vector<IndexedValue>();
         candidate_locations = working_locations; working_locations = Vector<IndexedLocation>();
+        candidate_present_types = working_present_types;
         candidate_kind = working_kind; candidate_filter = working_filter; candidate_scope = working_scope;
         candidate_truncated = working_truncated; search_started = true; search_busy = false; result_page = 0; discovery_seen.clear();
     }
@@ -853,6 +855,12 @@ Dictionary PlayerTools::search_results(bool include_rows) {
     result["searchUndoCount"] = search_history.size(); result["truncated"] = preview ? working_truncated : candidate_truncated;
     result["searching"] = search_busy; result["examined"] = working_examined; result["workingMatches"] = working_candidates.size(); result["searchDiscovery"] = preview;
     result["page"] = page; result["pageCount"] = page_count; result["undoCount"] = history.size();
+    const int types = preview ? working_present_types : candidate_present_types;
+    Array available_types;
+    if (types & (1 << int(Variant::BOOL))) available_types.push_back("bool");
+    if (types & (1 << int(Variant::STRING))) available_types.push_back("string");
+    if (types & ~((1 << int(Variant::BOOL)) | (1 << int(Variant::STRING)))) available_types.push_back("number");
+    result["searchTypes"] = available_types;
     result["indexedLocations"] = locations.size(); result["indexRecordsBytes"] = int64_t(candidates.size()) * sizeof(IndexedValue) + int64_t(locations.size()) * sizeof(IndexedLocation);
     return result;
 }

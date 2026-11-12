@@ -9,7 +9,7 @@ struct SearchToolsPanel: View {
 
     var body: some View {
         List {
-            Section(header: Text("Filters"), footer: Text("Filters work together. Narrow keeps only matching candidates and records a new baseline. Reopening tools, switching pages and refreshing never narrow the search. Results last until you exit this game.")) {
+            Section(header: Text("Filters"), footer: Text("Narrow checks only the current candidates. Search Whole Game Again includes variables excluded earlier. Refreshing and reopening tools preserve your baseline. Boolean searches match true/false; flags stored as 0/1 need Number searches.")) {
                 TextField("Variable name or path (optional)", text: $state.query)
                     .autocapitalization(.none).disableAutocorrection(true)
                 Picker("Type", selection: $state.kind) {
@@ -35,15 +35,19 @@ struct SearchToolsPanel: View {
                 if !state.scope.isEmpty {
                     Button("Search Whole Game Instead") { state.scope = ""; state.scopeLabel = "Whole game, including globals" }
                 }
-                if state.scopeChanged { Text("Scope changed. Use New Search to include this part of the game.").font(.caption).foregroundColor(.orange) }
+                if state.hasSearch {
+                    Text("Narrowing pool: \(state.candidateCount) current candidates. Available types: \(state.candidateTypes.map { $0 == "bool" ? "Boolean" : ($0 == "string" ? "Text" : "Number") }.joined(separator: ", "))").font(.caption).foregroundColor(.secondary)
+                    if state.needsNewSearch && !state.searching {
+                        Text("This search will start from the selected game scope and record a new baseline.").font(.caption).foregroundColor(.orange)
+                    }
+                }
                 if state.searching {
                     ProgressView("Searching: \(state.examined) checked · \(state.workingMatches) matches")
                     Button("Cancel Search") { state.receive(ToolsBridge.send(["action": "cancel_search"])) }
                 } else {
-                    Button(state.hasSearch ? "Narrow Results" : "Search") { search(start: !state.hasSearch) }
-                        .disabled(state.scopeChanged)
+                    Button(state.needsNewSearch ? (state.scope.isEmpty ? "Search Whole Game" : "Search This Scope") : "Narrow Results") { search(start: state.needsNewSearch) }
                     if state.hasSearch {
-                        Button("New Search…") { confirmNew = true }
+                        Button(state.scope.isEmpty ? "Search Whole Game Again…" : "Search This Scope Again…") { confirmNew = true }
                         Button("Undo Last Narrow (\(state.undoCount))") {
                             state.receive(ToolsBridge.send(["action": "undo_search"]), restoreFilters: true)
                         }.disabled(state.undoCount == 0)

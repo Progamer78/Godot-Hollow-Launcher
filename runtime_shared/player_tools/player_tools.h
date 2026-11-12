@@ -35,6 +35,7 @@ class PlayerTools : public PlayerToolsBase {
         Vector<IndexedValue> candidates;
         String filter, kind;
         int steps = 0;
+        int types = 0;
     };
     Vector<IndexedValue> number_candidates, working_candidates;
     Vector<IndexedLocation> candidate_locations, working_locations;
@@ -60,6 +61,7 @@ class PlayerTools : public PlayerToolsBase {
     int result_page = 0;
     String working_kind, working_filter, working_scope, working_expected, working_comparison;
     int working_type_mask = 0;
+    int working_present_types = 0, candidate_present_types = 0;
     bool working_name_spans = false, expected_int_valid = false, expected_float_valid = false;
     int64_t expected_int = 0;
     double expected_float = 0;

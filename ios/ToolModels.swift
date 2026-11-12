@@ -32,6 +32,7 @@ struct ToolReply: Decodable {
     var engineMemoryBytes: Double? = nil
     var searching: Bool? = nil
     var searchDiscovery: Bool? = nil
+    var searchTypes: [String]? = nil
     var examined: Int? = nil
     var workingMatches: Int? = nil
     var page: Int? = nil

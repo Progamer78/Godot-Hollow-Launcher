@@ -446,6 +446,29 @@ do {
 print("Persistent search state, pagination, scene inspector and pin ordering/selection passed")
 
 do {
+    let state = GameToolsState()
+    let numericPool = try JSONDecoder().decode(ToolReply.self, from: Data(#"{"ok":true,"searchStarted":true,"searchKind":"any","searchTypes":["number"],"candidateCount":200000,"rows":[{"object":"123","path":[{"kind":"property","name":"money"}],"label":"/root/Game.money","type":"int","value":"0"}]}"#.utf8))
+    state.receive(numericPool)
+    state.kind = "number"
+    require(!state.needsNewSearch, "A supported type narrows the existing pool")
+    state.kind = "bool"
+    require(state.needsNewSearch, "Boolean searches must start fresh after a number-only pool, even if it was created with Any type")
+    var mixed = numericPool; mixed.searchTypes = ["number", "bool"]
+    state.receive(mixed)
+    require(!state.needsNewSearch && state.rows.first?.type == "int", "Offscreen boolean candidates remain narrowable using whole-pool metadata, not visible rows")
+    state.scope = "456"
+    require(state.needsNewSearch, "A scope change explicitly searches the selected scene again")
+    state.scope = ""
+    var empty = numericPool; empty.candidateCount = 0; empty.rows = []; empty.searchTypes = []
+    state.receive(empty)
+    require(state.needsNewSearch, "An empty result offers a fresh search rather than narrowing an empty set forever")
+    var flags = mixed; flags.searchTypes = ["bool"]; flags.candidateCount = 200003
+    state.receive(flags)
+    require(!state.needsNewSearch && state.candidateTypes == ["bool"], "A boolean pool is retained for repeated change searches")
+}
+print("Boolean search type switching, offscreen type availability and empty-pool recovery passed")
+
+do {
     func searchReply(busy: Bool, rows: [ToolStat]?, examined: Int) -> ToolReply {
         var reply = ToolReply(ok: true, message: nil, rows: rows, truncated: false, visited: nil, undoCount: nil)
         reply.searching = busy; reply.searchDiscovery = busy; reply.searchStarted = !busy

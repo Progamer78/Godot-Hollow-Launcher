@@ -11,6 +11,7 @@ var checks = 0
 var typed_codes = []
 var search_fixture = []
 var search_dictionary = {}
+var bool_fixture = []
 
 func _input(event):
     if event is InputEventKey and event.pressed:
@@ -313,6 +314,39 @@ func run_checks():
     var dict_narrow = benchmark_search({"action":"refine_numbers","kind":"number","comparison":"decreased"}, "narrow 200000 dictionary entries through JSON transport")
     check(dict_narrow.candidateCount == 1 and dict_narrow.rows[0].label.ends_with(".entry_199000"), "large dictionary narrowing finds a late changed key")
     search_dictionary.clear()
+    check(dict_narrow.searchTypes == ["number"], "pool type metadata describes actual matches")
+    # Whole-game false searches must include large containers without a name filter.
+    player_flag = false
+    bool_fixture = [false, true, 0, 1, "false", "true", {"nested":false}]
+    for i in range(200000): search_fixture.append(false)
+    var all_false = benchmark_search({"action":"find_numbers","kind":"bool","comparison":"exact","value":"false"}, "whole game 200000 false booleans without a name filter")
+    check(all_false.candidateCount == 200003 and not all_false.truncated and all_false.searchTypes == ["bool"], "whole-game false search finds scalar, nested and all 200000 array flags")
+    var actual_false_rows = true
+    for false_row in all_false.rows:
+        actual_false_rows = actual_false_rows and false_row.type == "bool" and false_row.value.to_lower() == "false"
+    check(actual_false_rows, "whole-game false results contain actual booleans")
+    search_fixture[199000] = true
+    var bool_changed = benchmark_search({"action":"refine_numbers","kind":"bool","comparison":"changed"}, "narrow 200003 booleans to a changed offscreen flag")
+    check(bool_changed.candidateCount == 1 and bool_changed.rows[0].label.ends_with("[199000]") and bool_changed.rows[0].value.to_lower() == "true", "boolean narrowing checks every page and finds a late false-to-true change")
+    var bool_undo = wire_request({"action":"undo_search"})
+    check(bool_undo.candidateCount == 200003 and bool_undo.searchTypes == ["bool"], "undo restores the full boolean pool and type metadata")
+    var bool_partial = wire_request({"action":"find_numbers","kind":"number","comparison":"any"})
+    check(bool_partial.searching, "whole-game replacement search yields with a large boolean container")
+    var bool_cancelled = wire_request({"action":"cancel_search"})
+    check(bool_cancelled.candidateCount == 200003 and bool_cancelled.searchTypes == ["bool"], "cancelling replacement preserves boolean pool type metadata")
+    search_fixture.clear()
+    var nested_false = complete_search({"action":"find_numbers","kind":"bool","comparison":"exact","value":"FALSE","search":"bool_fixture"})
+    check(nested_false.candidateCount == 2 and nested_false.searchTypes == ["bool"], "boolean false search includes nested flags and excludes zero and text false")
+    var any_false = complete_search({"action":"find_numbers","kind":"any","comparison":"exact","value":"false","search":"bool_fixture"})
+    check(any_false.candidateCount == 3 and any_false.searchTypes.has("bool") and any_false.searchTypes.has("string") and not any_false.searchTypes.has("number"), "Any exact false includes boolean and literal text but not numeric zero")
+    var numeric_flags = complete_search({"action":"find_numbers","kind":"any","comparison":"exact","value":"0","search":"bool_fixture"})
+    check(numeric_flags.candidateCount == 1 and numeric_flags.searchTypes == ["number"], "numeric zero flags remain discoverable with actual type metadata even for Any searches")
+    var mixed_flags = complete_search({"action":"find_numbers","kind":"any","comparison":"any","search":"bool_fixture"})
+    check(mixed_flags.candidateCount == 7 and mixed_flags.searchTypes.size() == 3, "mixed container advertises all candidate types")
+    var narrowed_false = complete_search({"action":"refine_numbers","kind":"bool","comparison":"exact","value":"false"})
+    check(narrowed_false.candidateCount == 2 and narrowed_false.searchTypes == ["bool"], "Boolean false narrowing works from a mixed candidate pool")
+    var mixed_undo = tools.request({"action":"undo_search"})
+    check(mixed_undo.candidateCount == 7 and mixed_undo.searchTypes.size() == 3, "undo restores mixed type availability")
     print("PLAYER_TOOLS_PROOF PASS checks=", checks)
     get_tree().quit()
 

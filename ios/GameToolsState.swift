@@ -20,6 +20,7 @@ final class GameToolsState: ObservableObject {
     @Published var editUndoCount = 0
     @Published var hasSearch = false
     @Published var candidateCount = 0
+    @Published var candidateTypes: [String] = []
     @Published var staleCount = 0
     @Published var steps = 0
     @Published var undoCount = 0
@@ -38,6 +39,9 @@ final class GameToolsState: ObservableObject {
 
     var encodedValue: String { kind == "bool" ? booleanValue : value }
     var scopeChanged: Bool { hasSearch && scope != searchedScope }
+    var needsNewSearch: Bool {
+        !hasSearch || scopeChanged || candidateCount == 0 || (kind != "any" && !candidateTypes.contains(kind))
+    }
 
     private var searchSender: (([String: Any]) -> ToolReply)?
     private var searchActive = false
@@ -94,6 +98,7 @@ final class GameToolsState: ObservableObject {
         // until the next published page or the completed result replaces it.
         if let updated = reply.rows { rows = updated }
         candidateCount = reply.candidateCount ?? rows.count
+        candidateTypes = reply.searchTypes ?? Array(Set(rows.map { $0.type == "int" || $0.type == "float" ? "number" : $0.type }))
         staleCount = reply.staleCount ?? 0
         steps = reply.searchSteps ?? 0
         undoCount = reply.searchUndoCount ?? 0
