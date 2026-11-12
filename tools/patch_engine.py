@@ -4,7 +4,7 @@ import argparse
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH_REVISION = "hollow-release-zip-save-edit-v11"
+PATCH_REVISION = "hollow-swift-shared-dependencies-v12"
 
 
 def replace(path, old, new):
@@ -36,6 +36,15 @@ def patch(engine):
         'env_archive = env_apple_embedded.Clone()\n'
         'env_archive.Append(CCFLAGS=["-fno-modules", "-fno-cxx-modules"])\n'
         'env_archive.add_source_files(env_apple_embedded.drivers_sources, "ArchiveSupport.mm")')
+    # Each Swift primary file is compiled with every other file in the module.
+    # Upstream's builder only tracks the primary source, so cached consumers
+    # otherwise retain old shared-type layouts/initializers after a model edit.
+    replace(apple / "SCsub",
+        'env_apple_embedded.add_source_files(env_apple_embedded.drivers_sources, "*.swift")',
+        'swift_objects = []\n'
+        'env_apple_embedded.add_source_files(swift_objects, "*.swift")\n'
+        'env_apple_embedded.Depends(swift_objects, swift_files + Glob("*.h") + Glob("*.inc"))\n'
+        'env_apple_embedded.drivers_sources += swift_objects')
     app = apple / "app.swift"
     original = app.read_text(encoding="utf-8")
     app.write_text(original[:original.index("import SwiftUI")] + "// Entry point provided by PlayerApp.swift.\n", encoding="utf-8")
