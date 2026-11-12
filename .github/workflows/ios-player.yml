@@ -246,7 +246,7 @@ jobs:
             build/ipa-audit.json
             build/ios-archive-link/results.json
             build/input-ui/results.json
-            build/input-ui/run.log
+            build/input-ui/*.log
             build/*.log
             build/spine-build.json
             build/spine3-build.json

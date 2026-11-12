@@ -5,6 +5,7 @@ import subprocess
 from unittest.mock import patch
 from contextlib import redirect_stdout
 import io
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("input_ui", ROOT / "tools/check_input_ui.py")
@@ -13,6 +14,25 @@ spec.loader.exec_module(ui)
 
 
 class InputSafetyTests(unittest.TestCase):
+    def test_result_requires_success_and_rejects_any_failure(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            output = Path(directory); source = output / "app-result.log"
+            source.write_text("PLAYER_INPUT_UI_PASS: all checks\nPLAYER_INPUT_UI_FAIL: late failure")
+            with self.assertRaisesRegex(RuntimeError, "smoke test failed"):
+                ui.wait_for_result(source, output, timeout=0)
+            self.assertIn("late failure", (output / "run.log").read_text())
+            source.write_text("PLAYER_INPUT_UI_CHECK: intermediate PASS")
+            with self.assertRaises(RuntimeError): ui.wait_for_result(source, output, timeout=0)
+            source.write_text("PLAYER_INPUT_UI_PASS: all checks")
+            ui.wait_for_result(source, output, timeout=0)
+
+    def test_missing_completion_fails_and_records_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "no completion record"):
+                ui.wait_for_result(output / "absent", output, timeout=0)
+            self.assertIn("did not produce", (output / "run.log").read_text())
+
     def test_lifetime_selector_regression(self):
         self.assertEqual(ui.forbidden_callbacks("@objc func release() {}"), ["release"])
         self.assertEqual(ui.forbidden_callbacks("@objc(release) private func cleanUp() {}"), ["release"])

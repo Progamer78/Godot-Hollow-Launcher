@@ -35,8 +35,19 @@ enum ToolsBridge {
 @main
 final class InputSmokeApp: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
+    private var checkLog: [String] = []
+    private func record(_ message: String) { checkLog.append(message); print(message); fflush(stdout) }
+    private func finish(_ success: Bool, _ message: String) {
+        record("PLAYER_INPUT_UI_\(success ? "PASS" : "FAIL"): \(message)")
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try checkLog.joined(separator: "\n").write(to: folder.appendingPathComponent("input-ui-result.log"), atomically: true, encoding: .utf8)
+        } catch { print("Could not record input test result: \(error)") }
+        fflush(stdout); exit(success ? 0 : 1)
+    }
     private func check(_ value: @autoclosure () -> Bool, _ message: String) {
-        if !value() { print("PLAYER_INPUT_UI_FAIL: \(message)"); fflush(stdout); exit(1) }
+        if !value() { finish(false, message) }
     }
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         let controller = UIViewController()
@@ -60,7 +71,7 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
                 button.removeFromSuperview()
             }
         }
-        print("PLAYER_INPUT_UI_CHECK: control lifetime PASS")
+        record("PLAYER_INPUT_UI_CHECK: control lifetime PASS")
         let joystick = JoystickTouchView(frame: CGRect(x: 0, y: 0, width: 128, height: 128))
         joystick.configuration.output = "gamepad"
         root.addSubview(joystick)
@@ -87,7 +98,7 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
         GameInput.key("Pad A",pressed:true); GameInput.release()
         check(ToolsBridge.commands.contains { ($0["device"] as? Int) == 0 && ($0["kind"] as? String) == "button" && ($0["pressed"] as? Bool) == false },"Controller profile release reaches player-one output")
         GameInput.outputDevice=nil
-        print("PLAYER_INPUT_UI_CHECK: joystick, keyboard, Unicode and release PASS")
+        record("PLAYER_INPUT_UI_CHECK: joystick, keyboard, Unicode and release PASS")
         let mouse = MouseTouchView(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
         root.addSubview(mouse)
         // Exercise the same updater used by the display-link callback directly.
@@ -105,13 +116,12 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
         check(mouse.gestureRecognizers?.contains { $0.isEnabled } == true, "Ordinary trackpad gestures resume when second-finger click is off")
         check(PlayerRuntime.cursorPolls == before + 1 && PlayerRuntime.cursorPositionReads == positionsBefore + 1 && PlayerRuntime.cursorVisibilityReads == visibilityBefore + 1, "Cursor updater reads revision, position and visibility")
         check(mouse.subviews.first?.frame.origin == CGPoint(x: 20, y: 20) && mouse.subviews.first?.isHidden == false, "Cursor updater applies the game position and visibility to the view")
-        print("PLAYER_INPUT_UI_CHECK: cursor state and view update PASS")
+        record("PLAYER_INPUT_UI_CHECK: cursor state and view update PASS")
         DispatchQueue.main.async {
             mouse.stop(); mouse.removeFromSuperview()
             joystick.removeFromSuperview()
             keyboard.dismissKeyboard(notify: false); keyboard.removeFromSuperview()
-            print("PLAYER_INPUT_UI_PASS: control construction/lifetime, cursor, keyboard, Unicode and release")
-            fflush(stdout); exit(0)
+            self.finish(true, "control construction/lifetime, cursor, keyboard, Unicode and release")
         }
     }
 }
