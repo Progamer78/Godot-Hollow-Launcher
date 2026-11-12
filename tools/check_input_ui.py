@@ -85,13 +85,16 @@ def run(output):
     try:
         subprocess.run(["xcrun", "simctl", "boot", device], check=True, timeout=30)
         subprocess.run(["xcrun", "simctl", "bootstatus", device, "-b"], check=True, timeout=180)
-        subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True, timeout=60)
-        container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container", device, bundle, "data"], text=True, timeout=30).strip())
+        # Fresh hosted simulators can spend over a minute starting installd and
+        # FrontBoard even after bootstatus finishes. These are maximum limits;
+        # healthy runners proceed as soon as each command returns.
+        subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True, timeout=180)
+        container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container", device, bundle, "data"], text=True, timeout=60).strip())
         # Console attachment can outlive a short-lived UIKit process on a busy
         # freshly booted runner. Require an atomic completion record from the
         # actual test app, without keeping its console connection open.
         try:
-            result = subprocess.run(["xcrun", "simctl", "launch", device, bundle], capture_output=True, text=True, timeout=90)
+            result = subprocess.run(["xcrun", "simctl", "launch", device, bundle], capture_output=True, text=True, timeout=180)
         except subprocess.TimeoutExpired as error:
             partial = (error.stdout or b"") + (error.stderr or b"")
             if isinstance(partial, bytes): partial = partial.decode(errors="replace")
