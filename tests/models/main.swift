@@ -400,3 +400,37 @@ do {
     legacyBoolean.editorValue = "false"
     require(legacyBoolean.value == "false", "Editing a migrated boolean pin updates its reusable value")
 }
+
+do {
+    let state = GameToolsState()
+    state.query = "money"; state.kind = "number"; state.comparison = "changed"
+    state.consoleHistory = ["last expression"]
+    let data = Data(#"{"ok":true,"searchStarted":true,"searchKind":"any","searchFilter":"","candidateCount":2505,"page":2,"pageCount":26,"searchSteps":1,"searchUndoCount":1,"rows":[{"object":"123","path":[{"kind":"property","name":"money"}],"label":"/root/Game.money","type":"int","value":"81","previous":"80","frozen":true}]}"#.utf8)
+    let reply = try JSONDecoder().decode(ToolReply.self, from: data)
+    require(state.receive(reply) && state.rows.first?.previous == "80" && state.rows.first?.frozen == true, "Search state retains typed baseline and freeze data")
+    require(state.query == "money" && state.kind == "number" && state.comparison == "changed", "Reopening/refreshing never erases draft combined filters")
+    require(state.candidateCount == 2505 && state.page == 2 && state.pageCount == 26, "Visible page is independent from complete candidate count")
+    let failed = try JSONDecoder().decode(ToolReply.self, from: Data(#"{"ok":false,"message":"Invalid value"}"#.utf8))
+    require(!state.receive(failed) && state.rows.count == 1 && state.candidateCount == 2505 && state.page == 2, "Failed searches leave existing candidates and page intact")
+    // The same object is retained by GameScreen when its tools sheet is recreated.
+    let reopened = state
+    require(reopened.rows == state.rows && reopened.consoleHistory == ["last expression"], "Session state survives a new view reference")
+    state.scope = "456"
+    require(state.scopeChanged, "Changing scope requires an explicit new search")
+    state.receive(reply, restoreFilters: true)
+    require(state.kind == "any" && state.query.isEmpty, "Undo can restore the native filter snapshot explicitly")
+    let scene = try JSONDecoder().decode(ToolReply.self, from: Data(#"{"ok":true,"node":{"object":"123","name":"Button","path":"/root/Game/Button","className":"Button","scriptPath":"res://button.gd","scenePath":"","visible":true,"processing":false,"inputProcessing":true},"actions":[{"signal":"pressed","method":"buy","targetPath":"/root/Game","targetObject":"456"}]}"#.utf8))
+    require(scene.node?.inputProcessing == true && scene.actions?.first?.method == "buy", "Inspector decodes real node and connected method information")
+
+    let stored = temporary.appendingPathComponent("pin-order-library")
+    var game = decoded
+    let firstPin = SavedCheat(name: "Money", label: "/root/Game.money", type: "int", value: "99", monitored: true)
+    let topPin = SavedCheat(name: "Flag", label: "/root/Game.flag", type: "bool", value: "true", monitored: false)
+    game.savedCheats = [topPin, firstPin]
+    try FileManager.default.createDirectory(at: stored, withIntermediateDirectories: true)
+    try JSONEncoder().encode([game]).write(to: stored.appendingPathComponent("library.json"))
+    let loaded = GameLibrary(storageRoot: stored, savesRoot: stored.appendingPathComponent("Saves"))
+    require(loaded.games.first?.savedCheats?.map(\.id) == [topPin.id, firstPin.id], "Per-game pin ordering survives library reload")
+    require(loaded.games.first?.savedCheats?.filter { $0.monitored == true }.map(\.id) == [firstPin.id], "Monitor displays only explicitly selected pins after reload")
+}
+print("Persistent search state, pagination, scene inspector and pin ordering/selection passed")

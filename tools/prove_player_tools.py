@@ -35,6 +35,7 @@ def prove(editor, runtime, major, adjacent=False):
             (project / "Main.tscn").write_text('[gd_scene load_steps=2 format=2]\n[ext_resource path="res://Main.gd" type="Script" id=1]\n[node name="ToolsProof" type="Node"]\nscript = ExtResource( 1 )\n')
             script = (project / "Main.gd").read_text()
             script = script.replace('ClassDB.call("instantiate",', 'ClassDB.call("instance",')
+            script = script.replace('button.connect("pressed", Callable(self, "test_signal"))', 'button.connect("pressed", self, "test_signal")')
             script = script.replace("JSON.parse_string", "parse_json_wire").replace("JSON.stringify", "write_json_wire")
             script += '\nfunc parse_json_wire(text):\n    return JSON.parse(text).result\n\nfunc write_json_wire(value):\n    return JSON.print(value)\n'
             (project / "Main.gd").write_text(script)

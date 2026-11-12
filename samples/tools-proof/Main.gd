@@ -9,6 +9,7 @@ var stats_resource
 var tools
 var checks = 0
 var typed_codes = []
+var search_fixture = []
 
 func _input(event):
     if event is InputEventKey and event.pressed:
@@ -193,5 +194,91 @@ func run_checks():
     check(typed_codes.size() >= 3 and typed_codes[typed_codes.size() - 3] == 65 and typed_codes[typed_codes.size() - 2] == 233 and typed_codes[typed_codes.size() - 1] == 128578, "scene receives full Unicode text key events")
     var objects = tools.request({"action": "objects"})
     check(objects.ok and objects.rows.size() >= 2, "browser lists real scene objects")
+    # Read-only refresh and separate panels must not move the comparison baseline.
+    money = 80
+    var persistent = complete_search({"action":"find_numbers","kind":"number","comparison":"exact","value":"80","search":"ToolsProof.money"})
+    check(persistent.candidateCount == 1, "combined name/type/value search")
+    money = 81
+    var refreshed = tools.request({"action":"search_results"})
+    check(refreshed.rows[0].value == "81" and refreshed.rows[0].previous == "80" and refreshed.searchSteps == 0, "refresh retains comparison baseline")
+    tools.request({"action":"scene_tree"})
+    tools.request({"action":"capture_activity"})
+    persistent = complete_search({"action":"refine_numbers","kind":"any","comparison":"changed","search":"MONEY"})
+    check(persistent.candidateCount == 1 and persistent.rows[0].value == "81", "other panels never consume changed search")
+    var restored = tools.request({"action":"undo_search"})
+    check(restored.candidateCount == 1 and restored.rows[0].previous == "80" and restored.searchSteps == 0, "undo restores previous candidate baseline")
+    check(not tools.request({"action":"find_numbers","kind":"number","comparison":"exact","value":"bad"}).ok and tools.request({"action":"search_results"}).candidateCount == 1, "invalid search preserves existing candidates")
+    player_flag = false
+    var any_search = complete_search({"action":"find_numbers","kind":"any","comparison":"any","search":"player_"})
+    check(any_search.candidateCount == 2, "one search includes booleans and text together")
+    player_flag = true
+    any_search = complete_search({"action":"refine_numbers","kind":"bool","comparison":"changed","search":"flag"})
+    check(any_search.candidateCount == 1 and any_search.rows[0].value == "true", "name type and changed filters combine")
+    var text_search = complete_search({"action":"find_numbers","kind":"string","comparison":"exact","value":player_name,"search":"player_name"})
+    check(text_search.candidateCount == 1, "text exact search")
+    var text_before = player_name
+    player_name = "New screen"
+    text_search = complete_search({"action":"refine_numbers","kind":"string","comparison":"changed"})
+    check(text_search.candidateCount == 1 and text_search.rows[0].value == player_name, "text changed search")
+    var activity = tools.request({"action":"compare_activity"})
+    check(activity.ok and activity.changedCount >= 2, "scene change snapshot catches boolean and text changes independently")
+    var scene = tools.request({"action":"scene_tree","search":"ToolsProof"})
+    check(scene.ok and scene.nodes.size() >= 1 and scene.currentScene.scriptPath.ends_with("Main.gd"), "scene inspector reports actual script and scene paths")
+    var button = Button.new()
+    button.name = "InspectButton"
+    add_child(button)
+    button.connect("pressed", Callable(self, "test_signal"))
+    var detail = tools.request({"action":"scene_node","object":str(button.get_instance_id())})
+    var has_connection = false
+    for connection in detail.actions:
+        has_connection = has_connection or (connection.signal == "pressed" and connection.method == "test_signal" and connection.targetObject == str(get_instance_id()))
+    check(detail.ok and has_connection, "scene inspector resolves real connected signal targets")
+    var scoped = complete_search({"action":"find_numbers","kind":"any","comparison":"any","scope":str(button.get_instance_id())})
+    check(scoped.candidateCount == 0, "node scoped search excludes other nodes and globals")
+    check(not tools.request({"action":"refine_numbers","scope":""}).ok, "scope change requires explicit new search")
+    button.free()
+    # More than twenty pages, and beyond both previous array/candidate limits.
+    for i in range(2505): search_fixture.append(i)
+    var pending = tools.request({"action":"find_numbers","kind":"number","comparison":"any","search":"search_fixture"})
+    check(pending.ok and pending.searching, "large search yields instead of blocking for whole traversal")
+    check(not tools.request({"action":"find_numbers","comparison":"any"}).ok, "concurrent discovery is refused without corrupting current work")
+    tools.request({"action":"cancel_search"})
+    check(tools.request({"action":"search_results"}).candidateCount == 0, "cancel keeps previous completed scoped search")
+    var paged = complete_search({"action":"find_numbers","kind":"number","comparison":"any","search":"search_fixture"})
+    check(paged.candidateCount == 2505 and paged.pageCount == 26 and not paged.truncated, "search retains every candidate beyond old 150 and 2000 limits")
+    var first_label = paged.rows[0].label
+    var second_page = tools.request({"action":"search_results","page":1})
+    check(second_page.rows.size() == 100 and second_page.rows[0].label != first_label, "pages expose distinct candidates without truncating pool")
+    var last_page = tools.request({"action":"search_results","page":999})
+    check(last_page.page == 25 and last_page.rows.size() == 5, "page bounds clamp safely")
+    search_fixture[2000] = -10
+    paged = complete_search({"action":"refine_numbers","kind":"number","comparison":"decreased","search":"search_fixture"})
+    check(paged.candidateCount == 1 and paged.rows[0].label.ends_with("[2000]"), "narrowing checks offscreen candidates across all pages")
+    var undone = tools.request({"action":"undo_search"})
+    check(undone.candidateCount == 2505 and undone.searchSteps == 0, "undo restores complete paged candidate pool")
+    search_fixture.clear()
+    var wire_start = wire_request({"action":"find_numbers","kind":"bool","comparison":"any","search":"player_flag"})
+    while wire_start.searching: wire_start = wire_request({"action":"continue_search"})
+    player_flag = false
+    var wire_refresh = wire_request({"action":"search_results"})
+    check(wire_refresh.candidateCount == 1 and wire_refresh.rows[0].previous == "true" and wire_refresh.rows[0].value == "false", "JSON session survives separate requests with baseline intact")
+    var wire_narrow = wire_request({"action":"refine_numbers","kind":"bool","comparison":"changed"})
+    while wire_narrow.searching: wire_narrow = wire_request({"action":"continue_search"})
+    check(wire_narrow.candidateCount == 1, "JSON session supports changed narrowing after read-only refresh")
     print("PLAYER_TOOLS_PROOF PASS checks=", checks)
     get_tree().quit()
+
+func complete_search(command):
+    var reply = tools.request(command)
+    var batches = 0
+    while reply.ok and reply.get("searching", false) and batches < 2000:
+        reply = tools.request({"action":"continue_search"})
+        batches += 1
+    check(reply.ok and not reply.get("searching", false), "batched search completes")
+    return reply
+
+func wire_request(command):
+    return JSON.parse_string(tools.transport(JSON.stringify(command)))
+
+func test_signal():
+    pass

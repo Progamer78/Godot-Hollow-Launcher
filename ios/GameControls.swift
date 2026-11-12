@@ -67,6 +67,7 @@ struct GameScreen: View {
     @State private var editingStickID: UUID?
     @State private var showingController = false
     @State private var showingGestures = false
+    @StateObject private var toolsState = GameToolsState()
     @StateObject private var controllerInput = ControllerInput()
     @State private var showingTools = false
     @State private var controlArea = CGSize.zero
@@ -176,7 +177,10 @@ struct GameScreen: View {
         .onReceive(heartbeat) { now in
             guard phase == .active else { return }
             controllerInput.configure(profile.controller,active:launchReady && !editing && !menuOpen && !showingTools && !showingKeyboard && !showingController && !showingGestures,view:session.controller.view)
-            if launchReady { _ = ToolsBridge.send(["action": "tick"]) }
+            if launchReady {
+                _ = ToolsBridge.send(["action": "tick"])
+                if toolsState.searching { toolsState.receive(ToolsBridge.send(["action": "continue_search"])) }
+            }
             if now.timeIntervalSince(lastTick) >= 1 {
                 lastTick = now
                 let status = ToolsBridge.send(["action": "status"])
@@ -214,7 +218,7 @@ struct GameScreen: View {
         }
         .sheet(isPresented: $showingTools, onDismiss: {
             syncMouseMode()
-        }) { GameTools(gameID: session.id) }
+        }) { GameTools(gameID: session.id, state: toolsState) }
         .onAppear { GameInput.outputDevice=profile.controller?.enabled == true ? 0 : nil; UIApplication.shared.isIdleTimerDisabled = keepAwake; syncMouseMode() }
         .onDisappear { controllerInput.stop(); GameInput.release(); PlayerRuntime.setMouseEnabled(false); UIApplication.shared.isIdleTimerDisabled = false }
         .onChange(of: phase) { value in
