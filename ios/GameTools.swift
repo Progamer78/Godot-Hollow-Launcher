@@ -85,9 +85,9 @@ struct GameTools: View {
         }
         .onReceive(watchTimer) { _ in
             if watching && tab == "stats" { refresh() }
-            if tab == "pins" { refreshFreezes() }
+            refreshFreezes()
         }
-        .onChange(of: tab) { _ in refreshFreezes() }
+        .onChange(of: tab) { _ in refreshFreezes(); if tab == "stats" { refresh() } }
         .onDisappear { _ = ToolsBridge.send(["action": "pause", "enabled": false]) }
         .sheet(item: $selected) { stat in
             StatEditor(stat: stat, gameID: gameID) {
@@ -137,7 +137,7 @@ struct GameTools: View {
                                 Text(stat.value).font(.system(.body, design: .monospaced)).lineLimit(2).foregroundColor(.primary)
                                 Spacer()
                                 Text(stat.type).font(.caption).foregroundColor(.secondary)
-                                if stat.frozen == true { frozenBadge }
+                                if isFrozen(stat) { frozenBadge }
                                 Image(systemName: stat.type == "object" ? "chevron.right" : "pencil").foregroundColor(.blue)
                             }
                         }.padding(.vertical, 3)
@@ -179,7 +179,7 @@ struct GameTools: View {
             ForEach(findRows) { stat in Button { selected = stat } label: {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(stat.label).font(.caption).foregroundColor(.secondary)
-                    HStack { Text(stat.type == "bool" ? (stat.value == "true" ? "True" : "False") : stat.value).font(.system(.body, design: .monospaced)); if stat.frozen == true { frozenBadge } }
+                    HStack { Text(stat.type == "bool" ? (stat.value == "true" ? "True" : "False") : stat.value).font(.system(.body, design: .monospaced)); if isFrozen(stat) { frozenBadge } }
                 }
             }.disabled(!backedUp) }
         }.listStyle(InsetGroupedListStyle())
@@ -243,6 +243,7 @@ struct GameTools: View {
     }
 
     private var frozenBadge: some View { Label("Frozen", systemImage: "snowflake").font(.caption).foregroundColor(.blue) }
+    private func isFrozen(_ stat: ToolStat) -> Bool { frozenRows.contains { $0.id == stat.id && $0.type == stat.type } }
     private func refreshFreezes() { frozenRows = ToolsBridge.send(["action": "freezes"]).rows ?? [] }
     private func unfreeze(_ stat: ToolStat) {
         guard let target = ToolsBridge.target(stat) else { return }
