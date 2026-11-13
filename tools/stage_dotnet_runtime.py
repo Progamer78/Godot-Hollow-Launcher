@@ -36,6 +36,10 @@ def stage(output, rid, api=None):
     for folder in [runtime / 'runtimes' / rid / 'lib/net10.0', native]:
         for dll in folder.glob('*.dll'): shutil.copyfile(dll, managed / dll.name)
     shutil.copyfile(api, managed / 'GodotSharp.dll')
+    adapted = output / 'GodotSharp.metadata-compatible.dll'
+    run(['dotnet', 'run', '--project', Path(__file__).resolve().parents[1] / 'runtime_dotnet/api-patcher/Hollow.ApiPatcher.csproj',
+         '--configuration', 'Release', '--', managed / 'GodotSharp.dll', adapted])
+    shutil.copyfile(adapted, managed / 'GodotSharp.dll')
     for dylib in native.glob('libSystem.*.dylib'): shutil.copyfile(dylib, bundle / dylib.name)
     for name in ['LICENSE.TXT', 'THIRD-PARTY-NOTICES.TXT']:
         source = next(runtime.rglob(name), None)
@@ -52,7 +56,7 @@ def stage(output, rid, api=None):
         run(['xcrun','--sdk',sdk,'clang','-target',triple,'-isysroot',sdk_path,'-c',asm,'-o',obj]); objects.append(str(obj))
     libraries = [native / 'libmonosgen-2.0.a', native / 'libmono-component-marshal-ilgen-static.a']
     libraries += [native / ('libmono-component-' + name + '-stub-static.a') for name in ['debugger','diagnostics_tracing','hot_reload']]
-    result = {'version': VERSION, 'godot_version': GODOT_VERSION, 'rid': rid, 'native':str(native), 'bundle':str(bundle), 'objects':objects, 'libraries':list(map(str,libraries))}
+    result = {'version': VERSION, 'godot_version': GODOT_VERSION, 'metadata_compatibility': 'typed-delegate-v1', 'rid': rid, 'native':str(native), 'bundle':str(bundle), 'objects':objects, 'libraries':list(map(str,libraries))}
     (output / 'stage.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
     return result
 

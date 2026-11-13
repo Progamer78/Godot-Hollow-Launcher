@@ -141,7 +141,11 @@ jobs:
           python3 -m unittest discover -s tests -v
       - name: Stage legacy script compatibility and built-in AI runtime
         run: python3 tools/prepare_compatibility.py .cache/godot-source .cache/limboai
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
       - name: Stage the trusted iOS C# interpreter and matching Godot API
+        # Build-time adaptation only; imported game assemblies are unchanged.
         run: |
           python3 tools/stage_dotnet_runtime.py build/dotnet-runtime --rid ios-arm64
           python3 - <<'PY'
