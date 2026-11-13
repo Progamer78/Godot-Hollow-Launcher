@@ -37,9 +37,11 @@ def build(engine, output):
     libraries = list((engine / 'bin').glob('libgodot*.ios.template_release.arm64.simulator.a'))
     if len(libraries) != 1: raise RuntimeError('Expected exactly one experimental Godot simulator library: ' + str(libraries))
     app = output / 'HollowGodotProof.app'; shutil.copytree(mono['bundle'],app,dirs_exist_ok=True)
+    frameworks = app / 'Frameworks'; frameworks.mkdir(exist_ok=True)
+    for library in app.glob('libSystem.*.dylib'): shutil.move(str(library),frameworks / library.name)
     sdk = capture(['xcrun','--sdk','iphonesimulator','--show-sdk-path'],text=True).strip()
     command = ['xcrun','--sdk','iphonesimulator','clang++','-target','arm64-apple-ios15.0-simulator','-isysroot',sdk,
-               '-fobjc-arc',fixture / 'main.m',*mono['objects'],libraries[0],'-Wl,-ObjC','-lc++','-lz','-liconv']
+               '-fobjc-arc',fixture / 'main.m',*mono['objects'],libraries[0],'-Wl,-ObjC','-Wl,-rpath,@executable_path/Frameworks','-lc++','-lz','-liconv']
     for library in mono['libraries']: command += ['-Wl,-force_load,' + library]
     for framework in ['UIKit','Foundation','AVFoundation','AudioToolbox','CoreAudio','CoreGraphics','CoreMedia','CoreMotion','CoreText','CoreVideo','GameController','QuartzCore','Security','SystemConfiguration','CoreHaptics','UniformTypeIdentifiers','MobileCoreServices']:
         command += ['-framework',framework]
@@ -47,7 +49,7 @@ def build(engine, output):
     (app / 'Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':'org.godotplayer.dotnetgameproof','CFBundleExecutable':'HollowGodotProof',
         'CFBundleName':'Godot CSharp Proof','CFBundlePackageType':'APPL','CFBundleVersion':'1','CFBundleShortVersionString':'1.0',
         'MinimumOSVersion':'15.0','UIDeviceFamily':[1],'UILaunchScreen':{}}))
-    for library in app.glob('*.dylib'): run(['codesign','--force','--sign','-',library])
+    for library in frameworks.glob('*.dylib'): run(['codesign','--force','--sign','-',library])
     run(['codesign','--force','--sign','-',app])
     try: prewarm.wait(timeout=180)
     except subprocess.TimeoutExpired:
