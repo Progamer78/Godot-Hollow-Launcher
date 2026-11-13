@@ -16,6 +16,10 @@ on:
         description: 'Run the isolated C# interpreter experiment instead of building an IPA'
         type: boolean
         default: false
+      dotnet_game_probe:
+        description: 'Run the experimental real Godot C# scene on iOS Simulator instead of building an IPA'
+        type: boolean
+        default: false
   push:
     branches: [main, master]
 
@@ -24,7 +28,7 @@ permissions:
 
 jobs:
   export-and-build:
-    if: github.event_name != 'workflow_dispatch' || !inputs.dotnet_probe
+    if: github.event_name != 'workflow_dispatch' || (!inputs.dotnet_probe && !inputs.dotnet_game_probe)
     runs-on: macos-latest
     timeout-minutes: 180
     env:
@@ -271,5 +275,7 @@ jobs:
             build/proof/results.json
 
   dotnet-interpreter:
-    if: github.event_name == 'workflow_dispatch' && inputs.dotnet_probe
+    if: github.event_name == 'workflow_dispatch' && (inputs.dotnet_probe || inputs.dotnet_game_probe)
     uses: ./.github/workflows/dotnet-probe.yml
+    with:
+      game: ${{ inputs.dotnet_game_probe || false }}

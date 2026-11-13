@@ -92,7 +92,7 @@ def prove(output):
         while not record.is_file() and time.monotonic() < deadline: time.sleep(0.25)
         if not record.is_file(): raise RuntimeError("Interpreter process produced no completion record")
         shutil.copyfile(record, output / "results.json")
-        result = json.loads(record.read_text())
+        result = json.loads(record.read_text(encoding="utf-8"))
         if not result["passed"]: raise RuntimeError(result["message"])
     finally:
         if 'container' in locals():
@@ -100,10 +100,14 @@ def prove(output):
             if phase.is_file(): shutil.copyfile(phase, output / "phase.log")
         for path in (Path.home() / "Library/Logs/DiagnosticReports").glob("HollowMonoProbe*"):
             shutil.copyfile(path, output / ("crash-" + path.name))
-        logs = subprocess.run(["xcrun", "simctl", "spawn", device, "log", "show", "--last", "4m", "--style", "compact", "--predicate", "process == 'HollowMonoProbe'"], capture_output=True, text=True, timeout=30)
-        (output / "simulator.log").write_text(logs.stdout + logs.stderr)
-        from check_input_ui import cleanup_device
-        cleanup_device(device)
+        try:
+            logs = subprocess.run(["xcrun", "simctl", "spawn", device, "log", "show", "--last", "4m", "--style", "compact", "--predicate", "process == 'HollowMonoProbe'"], capture_output=True, text=True, timeout=30)
+            (output / "simulator.log").write_text(logs.stdout + logs.stderr, encoding="utf-8")
+        except (OSError, subprocess.TimeoutExpired) as error:
+            (output / "diagnostics-warning.log").write_text(str(error), encoding="utf-8")
+        finally:
+            from check_input_ui import cleanup_device
+            cleanup_device(device)
 
 
 if __name__ == "__main__":
