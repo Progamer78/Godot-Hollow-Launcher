@@ -12,6 +12,10 @@ on:
         description: 'Reuse engine compiler outputs (disable for a clean diagnostic build)'
         type: boolean
         default: true
+      dotnet_probe:
+        description: 'Run the isolated C# interpreter experiment instead of building an IPA'
+        type: boolean
+        default: false
   push:
     branches: [main, master]
 
@@ -20,6 +24,7 @@ permissions:
 
 jobs:
   export-and-build:
+    if: github.event_name != 'workflow_dispatch' || !inputs.dotnet_probe
     runs-on: macos-latest
     timeout-minutes: 180
     env:
@@ -263,3 +268,7 @@ jobs:
             build/proof/*.pck
             build/proof/*.log
             build/proof/results.json
+
+  dotnet-interpreter:
+    if: github.event_name == 'workflow_dispatch' && inputs.dotnet_probe
+    uses: ./.github/workflows/dotnet-probe.yml

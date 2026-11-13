@@ -1,6 +1,7 @@
 name: Probe iOS managed interpreter
 on:
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 jobs:
