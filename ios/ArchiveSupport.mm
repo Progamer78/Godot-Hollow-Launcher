@@ -37,6 +37,25 @@ static void archive_error(NSError **error, const std::string &message) {
     if(std::memcmp(digest,p+8,16)!=0 || std::memcmp(plain.bytes,"GDSC",4)!=0) return fail();
     return plain;
 }
++ (NSData *)decryptGodot4:(NSData *)bytes key:(NSData *)key magic:(BOOL)magic error:(NSError **)error {
+    auto fail=[&]() -> NSData* { archive_error(error,"Godot 4 data could not be decrypted and verified with this original runtime key."); return nil; };
+    const NSUInteger prefix=magic?4:0, header=prefix+40;
+    if(key.length!=32 || bytes.length<header || bytes.length>64*1024*1024+64) return fail();
+    const uint8_t *p=(const uint8_t*)bytes.bytes;
+    if(magic && std::memcmp(p,"GDEC",4)!=0) return fail();
+    uint64_t length=0;for(int i=0;i<8;i++) length|=uint64_t(p[prefix+16+i])<<(8*i);
+    if(length>64*1024*1024 || ((length+15)&~uint64_t(15))!=bytes.length-header) return fail();
+    CCCryptorRef cryptor=nullptr;
+    if(CCCryptorCreateWithMode(kCCDecrypt,kCCModeCFB,kCCAlgorithmAES,ccNoPadding,p+prefix+24,key.bytes,32,nullptr,0,0,0,&cryptor)!=kCCSuccess) return fail();
+    NSMutableData *plain=[NSMutableData dataWithLength:bytes.length-header+16];size_t moved=0,tail=0;
+    CCCryptorStatus status=CCCryptorUpdate(cryptor,p+header,bytes.length-header,plain.mutableBytes,plain.length,&moved);
+    if(status==kCCSuccess) status=CCCryptorFinal(cryptor,(uint8_t*)plain.mutableBytes+moved,plain.length-moved,&tail);
+    CCCryptorRelease(cryptor);
+    if(status!=kCCSuccess || moved+tail<length) return fail();
+    plain.length=NSUInteger(length);unsigned char digest[CC_MD5_DIGEST_LENGTH];CC_MD5(plain.bytes,CC_LONG(plain.length),digest);
+    if(std::memcmp(digest,p+prefix,16)!=0) return fail();
+    return plain;
+}
 + (NSArray<NSDictionary *> *)entriesAtPath:(NSString *)path error:(NSError **)error {
     std::vector<PlayerArchive::Entry> entries; std::string message;
     if (!PlayerArchive::list(path.fileSystemRepresentation, entries, message)) { archive_error(error, message); return nil; }

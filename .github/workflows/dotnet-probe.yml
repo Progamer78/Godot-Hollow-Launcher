@@ -5,6 +5,40 @@ on:
 permissions:
   contents: read
 jobs:
+  pack-import:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: '4.7.2'
+          use-dotnet: false
+          include-templates: false
+      - uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot
+          ref: ed1daf0bf001b61586d9930840f2f1394092c079
+          path: .cache/godot-source
+          persist-credentials: false
+          sparse-checkout: |
+            thirdparty/minizip
+            thirdparty/zlib
+      - name: Exercise encrypted pack import using Apple's native crypto bridge
+        run: |
+          set -o pipefail
+          mkdir -p build/dotnet-probe
+          python3 tools/desktop_proof.py "$(command -v godot)"
+          python3 tools/build_archive_support.py .cache/godot-source build/archive-tests
+          python3 tools/package_fixtures.py
+          godot --headless --path bootstrap --script ../tests/encrypted4.gd -- "$PWD/build/archive-tests"
+          swiftc -swift-version 5 -import-objc-header ios/ArchiveSupport.h ios/PCKInspector.swift ios/ControllerProfile.swift ios/ControlProfile.swift ios/LibraryQuery.swift ios/ToolModels.swift ios/GameToolsState.swift ios/PackageImport.swift ios/ExecutableImport.swift ios/SaveVault.swift ios/GameLibrary.swift tests/models/main.swift -L build/archive-tests -lplayer_archive -Xlinker -lc++ -lz -o build/model-tests
+          build/model-tests 2>&1 | tee build/dotnet-probe/encrypted-pack-models.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Hollow-encrypted-pack-tests
+          path: build/dotnet-probe/encrypted-pack-models.log
   interpreter:
     runs-on: macos-latest
     timeout-minutes: 30

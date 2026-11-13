@@ -218,7 +218,7 @@ final class GameLibrary: ObservableObject {
                     if let error = recoveryCoordination { throw error }
                     if let error = recoveryError { throw error }
                     guard let recovered = recovered else { throw PackError.invalid("Original executable could not be inspected.") }
-                    if recovered.1 != nil { note = (note.map { $0 + " " } ?? "") + "Original runtime script key recovered and all encrypted scripts validated. Game files are unchanged." }
+                    if recovered.1 != nil { note = (note.map { $0 + " " } ?? "") + "Original runtime key recovered; encrypted directory/scripts validated. Game files are unchanged." }
                     return (recovered.0, note, recovered.1)
                 }
                 guard let imported = prepared else { throw PackError.invalid("The game could not be inspected. Try importing its original files again.") }

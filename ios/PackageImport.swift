@@ -63,11 +63,11 @@ enum PackageImport {
     static func inspectPrepared(_ pack: URL, source: URL, note: String?, existingKey: Data? = nil, progress: ((String) -> Void)? = nil) throws -> PreparedGame {
         progress?("Checking game compatibility…")
         if let key = existingKey, let info = try? ExecutableImport.inspect(pack, key: key) {
-            return PreparedGame(pack: info, note: note, key: (info.encryptedScriptCount ?? 0) > 0 ? key : nil)
+            return PreparedGame(pack: info, note: note, key: info.needsKey ? key : nil)
         }
         do { return PreparedGame(pack: try PCKInspector.inspect(pack), note: note, key: nil) }
         catch let error as PackError {
-            guard case .encryptedScripts(let major, _, _) = error, major == 3, source.pathExtension.lowercased() == "zip" else { throw error }
+            guard error.recoveryMajor != nil, source.pathExtension.lowercased() == "zip" else { throw error }
         }
         let files = try entries(source)
         let packName = files.first { !$0.directory && ($0.name as NSString).pathExtension.lowercased() == "pck" }?.name ?? ""
@@ -80,19 +80,24 @@ enum PackageImport {
         }
         let candidates = files.filter { !$0.directory && ($0.name as NSString).pathExtension.lowercased() == "exe" && $0.size >= 64 && $0.size <= 128 * 1024 * 1024 }
             .sorted { rank($0) == rank($1) ? $0.name < $1.name : rank($0) < rank($1) }
-        guard !candidates.isEmpty else { throw PackError.invalid("This ZIP contains encrypted Godot 3 scripts but no supported original Windows x64 EXE (up to 128 MB). Import a ZIP containing the EXE and PCK from the same download, or select both files together.") }
+        guard !candidates.isEmpty else { throw PackError.invalid("This ZIP contains encrypted Godot data but no supported original Windows x64 EXE (up to 128 MB). Import a ZIP containing the EXE and PCK from the same download, or select both files together.") }
         let temporary = pack.deletingLastPathComponent().appendingPathComponent("original-\(UUID().uuidString).exe")
         defer { try? FileManager.default.removeItem(at: temporary) }
         for (index, candidate) in candidates.prefix(8).enumerated() {
             progress?("Checking original runtime \(index + 1) of \(min(8, candidates.count))…")
             try checkSpace(temporary, bytes: candidate.size)
             try extract(source, entry: candidate, destination: temporary, limit: 128 * 1024 * 1024)
-            if let recovered = try? ExecutableImport.recover(executable: temporary, pack: pack), recovered.1 != nil {
-                return PreparedGame(pack: recovered.0, note: (note.map { $0 + " " } ?? "") + "Original EXE found in ZIP; all encrypted scripts validated. Game files are unchanged.", key: recovered.1)
-            }
+            do {
+                let recovered = try ExecutableImport.recover(executable: temporary, pack: pack)
+                if recovered.1 != nil {
+                    return PreparedGame(pack: recovered.0, note: (note.map { $0 + " " } ?? "") + "Original EXE found in ZIP; encrypted directory/scripts validated. Game files are unchanged.", key: recovered.1)
+                }
+            } catch let error as PackError {
+                if case .unsupportedRuntime = error { throw error }
+            } catch { /* Try the next bounded companion. */ }
             try FileManager.default.removeItem(at: temporary)
         }
-        throw PackError.invalid("No matching script key was found in this ZIP. Use the original EXE and PCK from the same download. Only recognized Godot 3 Windows x64 runtimes are supported; at most eight EXEs are checked.")
+        throw PackError.invalid("No matching script key was found in this ZIP. Use the original EXE and PCK from the same download. Only recognized Godot 3/4 Windows x64 runtimes are supported; at most eight EXEs are checked.")
     }
     private static func checkSpace(_ destination: URL, bytes: UInt64) throws {
         let values = try FileManager.default.attributesOfFileSystem(forPath: destination.deletingLastPathComponent().path)

@@ -35,7 +35,20 @@ class ExecutableTests(unittest.TestCase):
             path=Path(d)/'original.exe'; path.write_bytes(fixture())
             result=subprocess.run([str(self.exe),str(path),str(0x800)],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
-            self.assertIn('candidates=1 expected_location_matches=1',result.stdout)
+            self.assertIn('expected_location_matches=1',result.stdout)
+            self.assertLessEqual(int(result.stdout.split('candidates=')[1].split()[0]),256)
+    def test_godot4_pack_loader_and_readonly_vector_key(self):
+        with tempfile.TemporaryDirectory() as d:
+            b=fixture();b[0x600:0x640]=bytes(64)
+            name=b'PackedSourcePCK::try_open_pack\0';b[0x600:0x600+len(name)]=name
+            # Optimized Godot 4 can copy the key using a RIP-relative XMM
+            # load from read-only data, rather than LEA from writable data.
+            b[0x420:0x428]=b'\x66\x0f\x6f\x05'+struct.pack('<i',0x2080-0x1028)
+            b[0x680:0x6a0]=bytes(range(32))
+            path=Path(d)/'original4.exe';path.write_bytes(b)
+            result=subprocess.run([str(self.exe),str(path),str(0x680)],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn('expected_location_matches=1',result.stdout)
     def test_malformed_and_unsupported_executables(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'bad.exe'

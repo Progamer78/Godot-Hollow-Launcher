@@ -2,6 +2,7 @@
 #import "Godot3API.h"
 #include <dlfcn.h>
 #include <atomic>
+#include <cstring>
 #import "app_delegate_service.h"
 #import "godot_app_delegate.h"
 #import "godot_view_controller.h"
@@ -31,6 +32,7 @@ BOOL player_main_started = NO;
 static NSString *requested_renderer;
 static BOOL attempted = NO;
 static NSData *pending_script_key;
+extern uint8_t script_encryption_key[32];
 static std::atomic<bool> controller_override(false);
 bool player_should_filter_controller() { return controller_override.load(); }
 static const GP3API *godot3 = nullptr;
@@ -118,6 +120,9 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
         godot3->controllerOverride(controller_override.load());
         return godot3->start(packPath, savePath, renderer, orientation, error);
     }
+    std::memset(script_encryption_key,0,32);
+    if(pending_script_key) std::memcpy(script_encryption_key,pending_script_key.bytes,32);
+    pending_script_key=nil;
     player_save_path = [savePath copy];
     requested_renderer = [renderer copy];
     held_keys = [NSMutableDictionary new];

@@ -304,6 +304,45 @@ do {
 print("ZIP-contained EXE/PCK recovery, wrong/missing companion rejection and original byte preservation passed")
 
 do {
+    let fixtures = URL(fileURLWithPath: "build/archive-tests")
+    let key = Data((0..<32).map { UInt8($0) })
+    let executable = fixtures.appendingPathComponent("original4-fixture.exe")
+    for mode in ["directory", "files", "both"] {
+        let pack = fixtures.appendingPathComponent("encrypted4-\(mode).pck")
+        let original = try Data(contentsOf: pack)
+        do { _ = try ExecutableImport.inspect(pack, key: nil); fatalError("Godot 4 encrypted pack accepted without a key") } catch {}
+        do { _ = try ExecutableImport.inspect(pack, key: Data(repeating: 0, count: 32)); fatalError("Wrong Godot 4 key accepted") } catch {}
+        let result = try ExecutableImport.recover(executable: executable, pack: pack)
+        require(result.1 == key && result.0.major == 4 && result.0.needsKey, "Original Godot 4 EXE must recover directory-only, asset-only and combined encryption")
+        require(result.0.encryptedDirectory == (mode != "files"), "Directory encryption is recorded independently from asset encryption")
+        let after = try Data(contentsOf: pack)
+        require(after == original, "Godot 4 recovery must preserve every original game byte")
+        var corrupt = original
+        if mode != "files" {
+            let directory = original[32..<40].enumerated().reduce(UInt64(0)) { $0 | UInt64($1.element) << (8 * $1.offset) }
+            corrupt[Int(directory) + 44] ^= 1
+            let broken = temporary.appendingPathComponent("corrupt4.pck"); try corrupt.write(to: broken)
+            do { _ = try ExecutableImport.inspect(broken, key: key); fatalError("Corrupt encrypted directory accepted") } catch {}
+        }
+        let zip = temporary.appendingPathComponent("encrypted4-\(mode).zip")
+        try GPArchive.create(zip.path, files: [pack.path, executable.path], names: ["game/Game.pck", "game/Game.exe"])
+        let copied = temporary.appendingPathComponent("copy4-\(mode).pck")
+        let note = try PackageImport.prepare(zip, destination: copied)
+        let prepared = try PackageImport.inspectPrepared(copied, source: zip, note: note)
+        require(prepared.key == key && prepared.pack.needsKey, "ZIP import must recover Godot 4 encrypted directories and assets")
+        let retained = try PackageImport.inspectPrepared(copied, source: zip, note: note, existingKey: key)
+        require(retained.key == key, "Directory-only keys must survive reimport and compatibility rechecks")
+    }
+    do {
+        _ = try ExecutableImport.recover(executable: executable, pack: fixtures.appendingPathComponent("encrypted4-csharp.pck"))
+        fatalError("C# game accepted before the managed runtime is integrated")
+    } catch {
+        require(error.localizedDescription.contains("unlocked") && error.localizedDescription.contains("C#/.NET"), "A successfully unlocked C# game must report the real remaining runtime blocker")
+    }
+}
+print("Godot 4 encrypted directory/assets, real AES-CFB integrity, original EXE/ZIP recovery and key persistence passed")
+
+do {
     let identity = UUID(), base = temporary.appendingPathComponent("TextSaves")
     let gameFolder = base.appendingPathComponent(identity.uuidString)
     try FileManager.default.createDirectory(at: gameFolder, withIntermediateDirectories: true)
