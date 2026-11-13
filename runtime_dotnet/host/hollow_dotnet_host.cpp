@@ -4,6 +4,7 @@
 #include "core/io/file_access.h"
 #include "core/os/os.h"
 #include "core/string/print_string.h"
+#include "modules/mono/utils/path_utils.h"
 #include <mono/jit/jit.h>
 #include <cstdio>
 
@@ -41,7 +42,7 @@ static bool portable_il(const Vector<uint8_t> &bytes) {
 }
 
 int hollow_dotnet_initialize(const char *, const char *, int, const char **, const char **, void **handle, unsigned int *domain) {
-	const String assembly = ProjectSettings::get_singleton()->get_setting("dotnet/project/assembly_name", "");
+	const String assembly = Path::get_csharp_project_name();
 	ERR_FAIL_COND_V_MSG(assembly.is_empty() || assembly.get_file() != assembly || assembly.contains(":"), -1, "Invalid managed game assembly name.");
 	String source;
 	Ref<DirAccess> publish = DirAccess::open("res://.godot/mono/publish");
@@ -54,8 +55,19 @@ int hollow_dotnet_initialize(const char *, const char *, int, const char **, con
 	}
 	publish->list_dir_end();
 	ERR_FAIL_COND_V_MSG(source.is_empty(), -1, "Main managed assembly is missing from this pack.");
-	const String cache = OS::get_singleton()->get_user_data_dir().path_join(".hollow-managed");
+	// Extracted IL is disposable runtime data, not a game save. Keep it out of
+	// save backups and separate it for each launcher's per-game user directory.
+	const String cache = OS::get_singleton()->get_cache_path().path_join("HollowManaged").path_join(OS::get_singleton()->get_user_data_dir().sha256_text());
 	ERR_FAIL_COND_V(DirAccess::make_dir_recursive_absolute(cache) != OK, -1);
+	Ref<DirAccess> previous = DirAccess::open(cache);
+	ERR_FAIL_COND_V(previous.is_null(), -1);
+	previous->list_dir_begin();
+	for (String name = previous->get_next(); !name.is_empty(); name = previous->get_next()) {
+		if (!previous->current_is_dir() && name.get_extension().to_lower() == "dll") {
+			ERR_FAIL_COND_V(previous->remove(name) != OK, -1);
+		}
+	}
+	previous->list_dir_end();
 	Ref<DirAccess> files = DirAccess::open(source);
 	ERR_FAIL_COND_V(files.is_null(), -1);
 	files->list_dir_begin(); int count = 0; uint64_t total = 0;
@@ -64,12 +76,18 @@ int hollow_dotnet_initialize(const char *, const char *, int, const char **, con
 		if (name != assembly + ".dll" && (name == "GodotSharp.dll" || name == "mscorlib.dll" || name == "netstandard.dll" || name.begins_with("System.") || name.begins_with("Microsoft."))) continue;
 		Ref<FileAccess> input = FileAccess::open(source.path_join(name), FileAccess::READ);
 		ERR_FAIL_COND_V(input.is_null() || input->get_length() > 32 * 1024 * 1024, -1);
-		Vector<uint8_t> bytes = input->get_buffer(input->get_length());
+		const uint64_t length = input->get_length();
+		Vector<uint8_t> bytes = input->get_buffer(length);
+		ERR_FAIL_COND_V_MSG(uint64_t(bytes.size()) != length, -1, "Could not read the complete managed game dependency: " + name);
 		ERR_FAIL_COND_V_MSG(!portable_il(bytes), -1, "Unsupported native, mixed-mode or ReadyToRun game dependency: " + name);
 		total += bytes.size();
 		ERR_FAIL_COND_V(++count > 128 || total > 128 * 1024 * 1024, -1);
 		Ref<FileAccess> target = FileAccess::open(cache.path_join(name), FileAccess::WRITE);
-		ERR_FAIL_COND_V(target.is_null(), -1); target->store_buffer(bytes); target->close();
+		ERR_FAIL_COND_V(target.is_null(), -1);
+		ERR_FAIL_COND_V_MSG(!target->store_buffer(bytes), -1, "Could not cache the managed game dependency: " + name);
+		target->flush();
+		ERR_FAIL_COND_V(target->get_error() != OK, -1);
+		target->close();
 	}
 	files->list_dir_end();
 	const String bundled = OS::get_singleton()->get_bundle_resource_dir();

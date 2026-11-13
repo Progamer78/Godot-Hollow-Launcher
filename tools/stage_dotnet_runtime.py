@@ -9,11 +9,15 @@ import urllib.request
 import zipfile
 from prove_dotnet_ios import VERSION, run
 
-def package(name, output):
-    archive = output / (name + '.nupkg')
+GODOT_VERSION = '4.7.2'
+
+def package(name, output, version=VERSION):
+    archive = output / (name + '.' + version + '.nupkg')
     if not archive.is_file():
-        with urllib.request.urlopen(f'https://api.nuget.org/v3-flatcontainer/{name}/{VERSION}/{name}.{VERSION}.nupkg', timeout=90) as source, archive.open('wb') as target:
+        temporary = archive.with_suffix('.download')
+        with urllib.request.urlopen(f'https://api.nuget.org/v3-flatcontainer/{name}/{version}/{name}.{version}.nupkg', timeout=90) as source, temporary.open('wb') as target:
             shutil.copyfileobj(source, target)
+        temporary.replace(archive)
     root = output / name
     with zipfile.ZipFile(archive) as z:
         for info in z.infolist():
@@ -21,8 +25,11 @@ def package(name, output):
         z.extractall(root)
     return root
 
-def stage(output, rid, api):
+def stage(output, rid, api=None):
     output.mkdir(parents=True, exist_ok=True)
+    if api is None:
+        api = package('godotsharp', output, GODOT_VERSION) / 'lib/net8.0/GodotSharp.dll'
+    if not api.is_file(): raise RuntimeError('The matching trusted GodotSharp assembly is missing')
     runtime = package('microsoft.netcore.app.runtime.mono.' + rid, output)
     native = runtime / 'runtimes' / rid / 'native'
     bundle = output / 'bundle'; managed = bundle / 'Managed'; managed.mkdir(parents=True, exist_ok=True)
@@ -45,10 +52,10 @@ def stage(output, rid, api):
         run(['xcrun','--sdk',sdk,'clang','-target',triple,'-isysroot',sdk_path,'-c',asm,'-o',obj]); objects.append(str(obj))
     libraries = [native / 'libmonosgen-2.0.a', native / 'libmono-component-marshal-ilgen-static.a']
     libraries += [native / ('libmono-component-' + name + '-stub-static.a') for name in ['debugger','diagnostics_tracing','hot_reload']]
-    result = {'version': VERSION, 'rid': rid, 'native':str(native), 'bundle':str(bundle), 'objects':objects, 'libraries':list(map(str,libraries))}
+    result = {'version': VERSION, 'godot_version': GODOT_VERSION, 'rid': rid, 'native':str(native), 'bundle':str(bundle), 'objects':objects, 'libraries':list(map(str,libraries))}
     (output / 'stage.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
     return result
 
 if __name__ == '__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('output',type=Path);parser.add_argument('api',type=Path);parser.add_argument('--rid',default='iossimulator-arm64')
-    args=parser.parse_args(); stage(args.output.resolve(),args.rid,args.api.resolve())
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('output',type=Path);parser.add_argument('api',type=Path,nargs='?');parser.add_argument('--rid',default='iossimulator-arm64',choices=['ios-arm64','iossimulator-arm64'])
+    args=parser.parse_args(); stage(args.output.resolve(),args.rid,args.api.resolve() if args.api else None)

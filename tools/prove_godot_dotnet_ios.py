@@ -31,7 +31,7 @@ def build(engine, output):
     patch(engine, proof=True)
     flags = ['platform=ios','simulator=yes','arch=arm64','target=template_release','module_mono_enabled=yes',
              'modules_enabled_by_default=no','vulkan=no','metal=no','opengl3=no','sdl=no',
-             'disable_3d=yes','debug_symbols=no','optimize=none','lto=none','-j' + str(min(4,os.cpu_count() or 3))]
+             'disable_path_overrides=no','disable_3d=yes','debug_symbols=no','optimize=none','lto=none','-j' + str(min(4,os.cpu_count() or 3))]
     run([sys.executable,'-m','SCons',*flags], cwd=engine, timeout=2400, env={**os.environ,'HOLLOW_MONO_NATIVE': mono['native']})
     libraries = list((engine / 'bin').glob('libgodot*.ios.template_release.arm64.simulator.a'))
     if len(libraries) != 1: raise RuntimeError('Expected exactly one experimental Godot simulator library: ' + str(libraries))

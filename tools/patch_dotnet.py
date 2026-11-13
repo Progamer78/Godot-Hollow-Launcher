@@ -23,7 +23,7 @@ GDMono *GDMono::singleton = nullptr;''')
     return true;
 ''' + text[match.end():]
     cpp.write_text(text, encoding='utf-8')
-    replace(cpp, 'return OS::get_singleton()->has_feature("dotnet");', 'return !String(ProjectSettings::get_singleton()->get_setting("dotnet/project/assembly_name", "")).is_empty();')
+    replace(cpp, 'return OS::get_singleton()->has_feature("dotnet");', 'return DirAccess::exists("res://.godot/mono/publish") || !String(ProjectSettings::get_singleton()->get_setting("dotnet/project/assembly_name", "")).is_empty();')
     scsub = mono / 'SCsub'
     with scsub.open('a', encoding='utf-8') as target:
         target.write('\nimport os\nenv_mono.Append(CPPPATH=[os.environ["HOLLOW_MONO_NATIVE"] + "/include/mono-2.0"])\n')
@@ -41,6 +41,9 @@ GDMono *GDMono::singleton = nullptr;''')
         replace(engine / 'drivers/apple_embedded/SCsub',
                 'env_apple_embedded.add_source_files(env_apple_embedded.drivers_sources, "*.swift")',
                 '# UIKit proof supplies main; ordinary Hollow builds retain SwiftUI.')
+        replace(engine / 'drivers/apple_embedded/os_apple_embedded.mm',
+                'Vector<Logger *> loggers;',
+                'Vector<Logger *> loggers;\n\tloggers.push_back(memnew(StdLogger));')
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('engine',type=Path);parser.add_argument('--proof',action='store_true')
