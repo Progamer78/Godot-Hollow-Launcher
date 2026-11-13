@@ -42,7 +42,8 @@ struct Game: Codable, Identifiable {
 enum RuntimeSelection {
     static func unbundledNativeFiles(for game: Game) -> [String] {
         (game.pack.nativeFiles ?? []).filter { path in
-            !(game.pack.major == 4 && path.lowercased().hasSuffix("/limboai.gdextension"))
+            !(game.pack.major == 4 && (path.lowercased().hasSuffix("/limboai.gdextension") ||
+                (game.pack.requiresDotnet == true && path.hasPrefix(".godot/mono/publish/") && path.lowercased().hasSuffix(".dll"))))
         }
     }
     static func problem(for game: Game) -> String? {
@@ -50,6 +51,7 @@ enum RuntimeSelection {
             return "The selected runtime must match the pack's Godot major version."
         }
         guard [3, 4].contains(game.pack.major) else { return "This player supports Godot 3 and 4 projects." }
+        if game.pack.requiresDotnet == true && !DotnetRuntime.bundled { return "This game needs a player build with the bundled Godot 4 C#/.NET runtime." }
         if game.pack.major == 4 && game.pack.minor > 7 { return "This pack needs a newer Godot runtime than 4.7.2." }
         if game.pack.major == 3 && game.pack.minor > 6 { return "This pack needs a newer Godot 3 runtime than 3.6.3." }
         let unbundled = unbundledNativeFiles(for: game)

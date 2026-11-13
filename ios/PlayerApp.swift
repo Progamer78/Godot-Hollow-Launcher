@@ -91,7 +91,7 @@ struct PlayerRoot: View {
                 } else if urls.count == 1 { library.importPack(url, replacing: replacingGame, engineHint: UInt32(importEngine)) }
                 else if urls.count == 2, let pack = urls.first(where: { $0.pathExtension.lowercased() == "pck" }), let exe = urls.first(where: { $0.pathExtension.lowercased() == "exe" }) {
                     library.importPack(pack, companion: exe, replacing: replacingGame, engineHint: UInt32(importEngine))
-                } else { library.error = "Choose one game archive, or select its original EXE and PCK together for encrypted Godot 3 games." }
+                } else { library.error = "Choose one game archive, or select its original EXE and PCK together for encrypted Godot 3 or 4 games." }
             case .failure(let error): layoutTarget = nil; replacement = nil; if !ImportCancellation.contains(error) { library.error = error.localizedDescription }
             }
         }

@@ -12,8 +12,15 @@ struct PackInfo: Codable, Equatable {
     var encryptedScriptCount: Int?
     var encryptedFileCount: Int? = nil
     var encryptedDirectory: Bool? = nil
+    var requiresDotnet: Bool? = nil
     var needsKey: Bool { (encryptedScriptCount ?? 0) > 0 || (encryptedFileCount ?? 0) > 0 || encryptedDirectory == true }
     var version: String { "\(major).\(minor).\(patch)" }
+}
+
+enum DotnetRuntime {
+    // Written only when the matching native host and trusted runtime resources
+    // have been installed by the build tools. Ordinary builds keep this off.
+    static var bundled: Bool { Bundle.main.object(forInfoDictionaryKey: "HollowDotnetRuntime") as? String == "10.0.15" }
 }
 
 enum PackError: LocalizedError {
@@ -45,7 +52,7 @@ enum PackError: LocalizedError {
 // Implements PackedSourcePCK::try_open_pack in the pinned official engine.
 // Inspect only the header and directory; game assets are never extracted.
 enum PCKInspector {
-    static func inspect(_ url: URL, decryptScript: ((Data) throws -> Data)? = nil, decryptBlock: ((Data, Bool) throws -> Data)? = nil) throws -> PackInfo {
+    static func inspect(_ url: URL, decryptScript: ((Data) throws -> Data)? = nil, decryptBlock: ((Data, Bool) throws -> Data)? = nil, allowDotnet: Bool = DotnetRuntime.bundled) throws -> PackInfo {
         let file = try PackReader(url)
         var reader = file
         let packSize = file.size
@@ -90,6 +97,7 @@ enum PCKInspector {
         var compiledScripts: [PackAsset] = []
         var encryptedFiles: [PackAsset] = []
         var dotnetExample: String?
+        var hasManagedAssembly = false
         for _ in 0..<count {
             let length = try reader.u32()
             guard length > 0, length <= 16_384 else { throw PackError.invalid("Invalid PCK path length.") }
@@ -124,8 +132,13 @@ enum PCKInspector {
                 if encryptedExample.isEmpty || encryptedExample.hasPrefix("addons/") { encryptedExample = path }
             }
             if ext == "cs" || path.hasPrefix(".godot/mono/publish/") { dotnetExample = dotnetExample ?? path }
+            let managedDLL = path.hasPrefix(".godot/mono/publish/") && ext == "dll"
+            if managedDLL {
+                let name = (path as NSString).lastPathComponent.lowercased()
+                if !name.hasPrefix("system.") && !name.hasPrefix("microsoft.") && !["godotsharp.dll", "mscorlib.dll", "netstandard.dll", "hostfxr.dll", "hostpolicy.dll", "coreclr.dll", "clrjit.dll", "mscordaccore.dll", "mscordbi.dll"].contains(name) { hasManagedAssembly = true }
+            }
             if ext == "gdc" { compiledScripts.append(asset) }
-            if ["gdextension", "gdnlib", "dll", "so", "dylib"].contains(ext), nativeFiles.count < 32 { nativeFiles.append(path) }
+            if !managedDLL, ["gdextension", "gdnlib", "dll", "so", "dylib"].contains(ext), nativeFiles.count < 32 { nativeFiles.append(path) }
         }
         let directoryEnd = encryptedDirectoryEnd ?? reader.position
         if encryptedDirectoryEnd != nil, reader.position != reader.size { throw PackError.invalid("Encrypted directory contains unexpected trailing data.") }
@@ -185,9 +198,12 @@ enum PCKInspector {
         // Directory-key validation completes before reporting a different
         // unsupported runtime, so recovery never confuses it with a bad key.
         if let example = dotnetExample {
-            throw PackError.unsupportedRuntime("This game requires C#/.NET (\(example)). Its managed runtime is not included in this build of Hollow. Windows .NET DLLs cannot be launched by the bundled GDScript runtime.")
+            guard major == 4 && allowDotnet else {
+                throw PackError.unsupportedRuntime("This game requires C#/.NET (\(example)). Its managed runtime is not included in this build of Hollow. Windows .NET DLLs cannot be launched by the bundled GDScript runtime.")
+            }
+            guard hasManagedAssembly else { throw PackError.invalid("This C# project has no compiled game assembly in its Godot publish directory. Import the complete exported game PCK.") }
         }
-        return PackInfo(format: format, major: major, minor: minor, patch: patch, fileCount: count, byteCount: packSize, nativeFiles: nativeFiles.isEmpty ? nil : nativeFiles, scriptVersions: versions.isEmpty ? nil : versions.sorted(), encryptedScriptCount: encryptedScripts == 0 ? nil : encryptedScripts, encryptedFileCount: encryptedFiles.isEmpty ? nil : encryptedFiles.count, encryptedDirectory: flags & 1 != 0)
+        return PackInfo(format: format, major: major, minor: minor, patch: patch, fileCount: count, byteCount: packSize, nativeFiles: nativeFiles.isEmpty ? nil : nativeFiles, scriptVersions: versions.isEmpty ? nil : versions.sorted(), encryptedScriptCount: encryptedScripts == 0 ? nil : encryptedScripts, encryptedFileCount: encryptedFiles.isEmpty ? nil : encryptedFiles.count, encryptedDirectory: flags & 1 != 0, requiresDotnet: dotnetExample == nil ? nil : true)
     }
 }
 

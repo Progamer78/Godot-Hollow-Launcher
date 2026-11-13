@@ -52,6 +52,9 @@ def execute(output):
     # Built after the native app and never linked/AOT-compiled into it.
     pack = output / 'independent-csharp.pck'
     run(['godot','--headless','--path',fixture,'--script','pack.gd','--',pack,compiled / 'HollowDotnetProof.dll'])
+    inspector = output / 'dotnet-import-tests'
+    run(['swiftc','-swift-version','5',ROOT / 'ios/PCKInspector.swift',ROOT / 'tests/dotnet/main.swift','-o',inspector])
+    run([inspector,pack])
     runtimes=json.loads(capture(['xcrun','simctl','list','runtimes','--json'],text=True))['runtimes']
     runtime=sorted([r for r in runtimes if r.get('isAvailable') and '.iOS-' in r['identifier']],key=lambda r:tuple(map(int,r['version'].split('.'))))[-1]['identifier']
     devices=json.loads(capture(['xcrun','simctl','list','devices','available','--json'],text=True))['devices'][runtime]
