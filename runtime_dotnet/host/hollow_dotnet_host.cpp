@@ -83,8 +83,8 @@ int hollow_dotnet_initialize(const char *, const char *, int, const char **, con
 	CharString trusted = tpa.utf8(), paths = (cache + ":" + managed).utf8(), base = managed.utf8(), native = bundled.utf8();
 	const char *keys[] = { "TRUSTED_PLATFORM_ASSEMBLIES", "APP_PATHS", "APP_CONTEXT_BASE_DIRECTORY", "NATIVE_DLL_SEARCH_DIRECTORIES" };
 	const char *values[] = { trusted.get_data(), paths.get_data(), base.get_data(), native.get_data() };
-	mono_aot_register_module(mono_aot_module_System_Private_CoreLib_info);
-	mono_aot_register_module(mono_aot_module_GodotSharp_info);
+	mono_aot_register_module(reinterpret_cast<void **>(mono_aot_module_System_Private_CoreLib_info));
+	mono_aot_register_module(reinterpret_cast<void **>(mono_aot_module_GodotSharp_info));
 	mono_jit_set_aot_mode(MONO_AOT_MODE_INTERP);
 	print_line("HOLLOW_DOTNET: Starting signed Mono interpreter with independent managed game assemblies.");
 	return coreclr_initialize("Hollow", "Hollow", 4, keys, values, handle, domain);
