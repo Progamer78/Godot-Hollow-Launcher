@@ -1,13 +1,13 @@
 #include "register_types.h"
 #include "player_tools.h"
 #if VERSION_MAJOR >= 4
-#ifdef IOS_ENABLED
+#if defined(IOS_ENABLED) && !defined(XR_DISABLED)
 #include "unavailable_xr.h"
 #endif
 void initialize_player_tools_module(ModuleInitializationLevel level) {
     if (level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         ClassDB::register_class<PlayerTools>();
-#ifdef IOS_ENABLED
+#if defined(IOS_ENABLED) && !defined(XR_DISABLED)
         hollow_register_unavailable_xr();
 #endif
     }
