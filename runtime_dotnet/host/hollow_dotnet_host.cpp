@@ -128,6 +128,7 @@ int hollow_dotnet_initialize(const char *, const char *, int, const char **, con
 #include "main/main.h"
 #include "core/os/main_loop.h"
 extern int apple_embedded_main(int, char **);
+extern void apple_embedded_finish();
 // The ordinary Xcode exporter generates these callbacks. This isolated proof
 // includes no export plugins and supplies the same empty callbacks itself.
 void godot_apple_embedded_plugins_initialize() {}
@@ -153,8 +154,15 @@ extern "C" int HollowRunGodotProof(const char *executable, const char *pack, con
 	// tree, and initializing that tree invokes _Ready and enables processing.
 	loop->initialize();
 	fprintf(stderr, "HOLLOW_GODOT_LOOP_INITIALIZED\n");
-	for (int frame = 0; frame < 300; frame++) { if (Main::iteration()) { fprintf(stderr, "HOLLOW_GODOT_FINISHED: %d frames\n", frame); return 0; } }
+	for (int frame = 0; frame < 300; frame++) {
+		if (Main::iteration()) {
+			fprintf(stderr, "HOLLOW_GODOT_FINISHED: %d frames\n", frame);
+			apple_embedded_finish();
+			return 0;
+		}
+	}
 	fprintf(stderr, "HOLLOW_GODOT_FRAME_LIMIT\n");
+	apple_embedded_finish();
 	return 2;
 }
 #endif
