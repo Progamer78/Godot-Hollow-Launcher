@@ -43,8 +43,8 @@ public static class MetadataFactoryInvoker
             {
                 case OperandType.InlineNone: break;
                 case OperandType.ShortInlineI: operand = (sbyte)bytes[offset++]; break;
-                case OperandType.ShortInlineVar: operand = (short)bytes[offset++]; break;
-                case OperandType.InlineVar: operand = BitConverter.ToInt16(bytes, offset); offset += 2; break;
+                case OperandType.ShortInlineVar: operand = bytes[offset++]; break;
+                case OperandType.InlineVar: operand = BitConverter.ToUInt16(bytes, offset); offset += 2; break;
                 case OperandType.InlineI8: operand = BitConverter.ToInt64(bytes, offset); offset += 8; break;
                 case OperandType.ShortInlineR: operand = BitConverter.ToSingle(bytes, offset); offset += 4; break;
                 case OperandType.InlineR: operand = BitConverter.ToDouble(bytes, offset); offset += 8; break;
@@ -84,8 +84,8 @@ public static class MetadataFactoryInvoker
             {
                 case OperandType.InlineNone: il.Emit(code); break;
                 case OperandType.ShortInlineI: il.Emit(code, (sbyte)operand!); break;
-                case OperandType.InlineVar:
-                case OperandType.ShortInlineVar: il.Emit(code, (short)operand!); break;
+                case OperandType.InlineVar: il.Emit(code, unchecked((short)(ushort)operand!)); break;
+                case OperandType.ShortInlineVar: il.Emit(code, (byte)operand!); break;
                 case OperandType.InlineI: il.Emit(code, (int)operand!); break;
                 case OperandType.InlineI8: il.Emit(code, (long)operand!); break;
                 case OperandType.ShortInlineR: il.Emit(code, (float)operand!); break;
