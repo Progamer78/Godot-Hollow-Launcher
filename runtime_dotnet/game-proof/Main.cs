@@ -12,6 +12,16 @@ public partial class Main : Node2D
 
     public override void _Ready()
     {
+        var discovered = ReentryLoader.Load("res://reentry/Avatar.tscn", "res://reentry/Nested.tscn");
+        if (discovered.Count != 2 || ReentryLoader.NestedLoads != 1)
+            throw new Exception("Script metadata eagerly initialized the avatar during scene enumeration");
+        using (var avatar = discovered[0].Instantiate<ReentryAvatar>())
+        {
+            if (avatar.RelatedCount() != 1 || ReentryLoader.NestedLoads != 2 || !(bool)avatar.Get("Available")
+                || !avatar.HasSignal("ReadyForPlay"))
+                throw new Exception("Normal avatar initialization or exported metadata was lost");
+        }
+        GD.Print("HOLLOW_METADATA_REENTRY_PASS");
         initial = new Vector2(3, 4);
         Position = initial;
         AddChild(new Node { Name = "ManagedChild" });
@@ -32,7 +42,7 @@ public partial class Main : Node2D
         using var file = Godot.FileAccess.Open("user://dotnet-proof.json", Godot.FileAccess.ModeFlags.Write);
         if (file == null) throw new Exception("Godot save API did not open the proof record");
         file.StoreString("{\"passed\":" + (passed ? "true" : "false") + ",\"frames\":" + frames
-            + ",\"coins\":" + Coins + ",\"godot_game_execution\":true,\"bcl_file_io\":true}");
+            + ",\"coins\":" + Coins + ",\"godot_game_execution\":true,\"bcl_file_io\":true,\"metadata_reentry\":true}");
         file.Close();
         GD.Print(passed ? "HOLLOW_GODOT_DOTNET_PASS" : "HOLLOW_GODOT_DOTNET_FAIL");
         GetTree().Quit(passed ? 0 : 1);
