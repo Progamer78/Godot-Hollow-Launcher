@@ -35,6 +35,10 @@ def audit(path):
             for assembly in ['System.Private.CoreLib.dll', 'GodotSharp.dll']:
                 data = archive.read(app + 'Managed/' + assembly)
                 if len(data) < 128 or data[:2] != b'MZ': raise RuntimeError('Invalid bundled managed assembly: ' + assembly)
+            if info.get('HollowMetadataCompatibility'):
+                if info['HollowMetadataCompatibility'] != 'isolated-factory-v2': raise RuntimeError('Unexpected metadata compatibility bridge')
+                helper = archive.read(app + 'Managed/Hollow.MetadataBridge.dll')
+                if len(helper) < 128 or helper[:2] != b'MZ': raise RuntimeError('Missing or invalid metadata compatibility bridge')
             for component in ['Globalization.Native', 'IO.Compression.Native', 'Native', 'Net.Security.Native', 'Security.Cryptography.Native.Apple']:
                 library = 'libSystem.' + component + '.dylib'
                 image(app + 'Frameworks/', {'CFBundleExecutable':library, 'MinimumOSVersion':'15.0'}, 6)

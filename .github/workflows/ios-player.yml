@@ -147,6 +147,7 @@ jobs:
       - name: Stage the trusted iOS C# interpreter and matching Godot API
         # Build-time adaptation only; imported game assemblies are unchanged.
         run: |
+          dotnet run --project tests/dotnet-metadata/Hollow.Metadata.Tests.csproj --configuration Release
           python3 tools/stage_dotnet_runtime.py build/dotnet-runtime --rid ios-arm64
           python3 - <<'PY'
           import json, os

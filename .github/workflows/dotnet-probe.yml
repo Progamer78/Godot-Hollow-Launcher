@@ -114,6 +114,7 @@ jobs:
           set -o pipefail
           python3 -m venv .cache/dotnet-proof-env
           .cache/dotnet-proof-env/bin/pip install scons==4.10.1
+          dotnet run --project tests/dotnet-metadata/Hollow.Metadata.Tests.csproj --configuration Release
           mkdir -p build/godot-dotnet-proof
           .cache/dotnet-proof-env/bin/python tools/prove_godot_dotnet_ios.py .cache/godot-source build/godot-dotnet-proof --phase build 2>&1 | tee build/godot-dotnet-proof/build.log
       - name: Save compiled scene runner before executing the game

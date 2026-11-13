@@ -21,7 +21,7 @@ def read_stage(path):
     if stage['version'] != VERSION or stage['rid'] != 'ios-arm64' or stage['godot_version'] != '4.7.2':
         raise RuntimeError('The device runtime does not match this launcher build')
     bundle = Path(stage['bundle'])
-    for name in ['System.Private.CoreLib.dll', 'GodotSharp.dll']:
+    for name in ['System.Private.CoreLib.dll', 'GodotSharp.dll', 'Hollow.MetadataBridge.dll']:
         if not (bundle / 'Managed' / name).is_file():
             raise RuntimeError('Missing trusted managed runtime component: ' + name)
     for name in [*NATIVE_LIBRARIES, 'Mono-LICENSE.TXT', 'Mono-THIRD-PARTY-NOTICES.TXT']:
@@ -44,6 +44,7 @@ def prepare(export, stage_path):
     info = export / 'player/player-Info.plist'
     metadata = plistlib.loads(info.read_bytes())
     metadata['HollowDotnetRuntime'] = VERSION
+    metadata['HollowMetadataCompatibility'] = stage['metadata_compatibility']
     info.write_bytes(plistlib.dumps(metadata))
 
 
