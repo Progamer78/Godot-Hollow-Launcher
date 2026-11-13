@@ -99,7 +99,7 @@ int hollow_dotnet_initialize(const char *, const char *, int, const char **, con
 		if (!platform->current_is_dir() && name.get_extension() == "dll") { if (!tpa.is_empty()) tpa += ":"; tpa += managed.path_join(name); }
 	}
 	platform->list_dir_end();
-	CharString trusted = tpa.utf8(), paths = (cache + ":" + managed).utf8(), base = managed.utf8(), native = bundled.utf8();
+	CharString trusted = tpa.utf8(), paths = (cache + ":" + managed).utf8(), base = managed.utf8(), native = (bundled + ":" + bundled.path_join("Frameworks")).utf8();
 	const char *keys[] = { "TRUSTED_PLATFORM_ASSEMBLIES", "APP_PATHS", "APP_CONTEXT_BASE_DIRECTORY", "NATIVE_DLL_SEARCH_DIRECTORIES" };
 	const char *values[] = { trusted.get_data(), paths.get_data(), base.get_data(), native.get_data() };
 	mono_aot_register_module(reinterpret_cast<void **>(mono_aot_module_System_Private_CoreLib_info));

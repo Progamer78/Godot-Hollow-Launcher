@@ -29,14 +29,27 @@ def audit(path):
         guest = image(framework, plistlib.loads(archive.read(framework + 'Info.plist')), 6)
         for notice in ['LICENSE.txt', 'COPYRIGHT.txt']:
             if len(archive.read(framework + notice)) < 10: raise RuntimeError('Missing Godot 3 notice')
+        dotnet = info.get('HollowDotnetRuntime')
+        if dotnet:
+            if dotnet != '10.0.15': raise RuntimeError('Unexpected bundled managed runtime version')
+            for assembly in ['System.Private.CoreLib.dll', 'GodotSharp.dll']:
+                data = archive.read(app + 'Managed/' + assembly)
+                if len(data) < 128 or data[:2] != b'MZ': raise RuntimeError('Invalid bundled managed assembly: ' + assembly)
+            for component in ['Globalization.Native', 'IO.Compression.Native', 'Native', 'Net.Security.Native', 'Security.Cryptography.Native.Apple']:
+                library = 'libSystem.' + component + '.dylib'
+                image(app + 'Frameworks/', {'CFBundleExecutable':library, 'MinimumOSVersion':'15.0'}, 6)
+            for notice in ['Mono-LICENSE.TXT', 'Mono-THIRD-PARTY-NOTICES.TXT']:
+                if len(archive.read(app + notice)) < 10: raise RuntimeError('Missing Mono runtime notice')
+            if b'HOLLOW_DOTNET:' not in archive.read(app + info['CFBundleExecutable']):
+                raise RuntimeError('Managed resources were packaged without the native interpreter host')
         bundled_packs = [name for name in names if name.startswith(app) and name.lower().endswith('.pck') and archive.getinfo(name).file_size > 0]
         if bundled_packs: raise RuntimeError('Unexpected bundled game PCK; launcher must select the imported main project')
         if archive.testzip() is not None: raise RuntimeError('IPA CRC check failed')
-        return {'app_arm64_bytes':host,'godot3_arm64_bytes':guest,'bundled_games':0,'package_checks':'passed','device_execution':'not established by package checks'}
+        return {'app_arm64_bytes':host,'godot3_arm64_bytes':guest,'dotnet_runtime':dotnet or 'none','bundled_games':0,'package_checks':'passed','device_execution':'not established by package checks'}
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('ipa',type=Path)
     parser.add_argument('--report',type=Path,default=Path('build/ipa-audit.json'))
     args=parser.parse_args(); result=audit(args.ipa)
-    args.report.write_text(json.dumps(result,indent=2)+'\n'); print(json.dumps(result,indent=2))
+    args.report.write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8'); print(json.dumps(result,indent=2))
