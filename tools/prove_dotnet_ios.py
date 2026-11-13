@@ -16,7 +16,7 @@ VERSION = "10.0.15"
 
 def run(command, **kwargs):
     print(" ".join(map(str, command)), flush=True)
-    return subprocess.run(list(map(str, command)), check=True, timeout=240, **kwargs)
+    return subprocess.run(list(map(str, command)), check=True, timeout=kwargs.pop("timeout", 240), **kwargs)
 
 
 def prove(output):
@@ -84,7 +84,7 @@ def prove(output):
     phone = next(d for d in devices if d["name"].startswith("iPhone") and d.get("deviceTypeIdentifier"))
     device = subprocess.check_output(["xcrun", "simctl", "create", "HollowMonoProbe", phone["deviceTypeIdentifier"], runtime], text=True).strip()
     try:
-        run(["xcrun", "simctl", "boot", device]); run(["xcrun", "simctl", "bootstatus", device, "-b"])
+        run(["xcrun", "simctl", "boot", device]); run(["xcrun", "simctl", "bootstatus", device, "-b"], timeout=600)
         run(["xcrun", "simctl", "install", device, output / "iossimulator-arm64.app"])
         container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container", device, "org.godotplayer.monoprobe", "data"], text=True).strip())
         run(["xcrun", "simctl", "launch", "--stdout=" + str(output / "stdout.log"), "--stderr=" + str(output / "stderr.log"), device, "org.godotplayer.monoprobe"])
