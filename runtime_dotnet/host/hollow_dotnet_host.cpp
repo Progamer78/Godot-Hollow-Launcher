@@ -93,6 +93,10 @@ int hollow_dotnet_initialize(const char *, const char *, int, const char **, con
 #ifdef HOLLOW_DOTNET_PROOF
 #include "main/main.h"
 extern int apple_embedded_main(int, char **);
+// The ordinary Xcode exporter generates these callbacks. This isolated proof
+// includes no export plugins and supplies the same empty callbacks itself.
+void godot_apple_embedded_plugins_initialize() {}
+void godot_apple_embedded_plugins_deinitialize() {}
 extern "C" int HollowRunGodotProof(const char *pack, const char *log) {
 	char *argv[] = { const_cast<char *>("HollowGodotProof"), const_cast<char *>("--headless"), const_cast<char *>("--main-pack"), const_cast<char *>(pack), const_cast<char *>("--log-file"), const_cast<char *>(log), nullptr };
 	if (apple_embedded_main(6, argv) != 0 || Main::setup2(false) != OK || Main::start() != OK) return 1;
