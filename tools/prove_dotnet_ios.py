@@ -42,6 +42,9 @@ def prove(output):
         app = output / (rid + ".app"); app.mkdir(exist_ok=True)
         managed = app / "Managed"; managed.mkdir(exist_ok=True)
         for dll in (unpacked / "runtimes" / rid / "lib/net10.0").glob("*.dll"): shutil.copyfile(dll, managed / dll.name)
+        # CoreLib is under native/ in Mono packs, unlike the other assemblies.
+        for dll in native.glob("*.dll"): shutil.copyfile(dll, managed / dll.name)
+        if not (managed / "System.Private.CoreLib.dll").is_file(): raise RuntimeError("Mono runtime package has no core library")
         shutil.copyfile(output / "Host/HollowManagedProbe.dll", managed / "HollowManagedProbe.dll")
         shutil.copyfile(output / "Game/IndependentGame.dll", app / "IndependentGame.dll")
         for library in native.glob("libSystem.*.dylib"):
