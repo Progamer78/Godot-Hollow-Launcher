@@ -2,7 +2,7 @@
 from pathlib import Path
 import argparse
 import shutil
-from patch_ios_graphics import patch as patch_ios_graphics
+from patch_ios_graphics import patch as patch_ios_graphics, patch_sampler_arrays
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH_REVISION = "hollow-swift-shared-dependencies-v12"
@@ -20,6 +20,7 @@ def patch(engine):
     if "import SwiftUI" not in (apple / "app.swift").read_text(encoding="utf-8"):
         raise RuntimeError("Expected an unmodified official Apple entry point; refusing to patch twice.")
     patch_ios_graphics(engine)
+    patch_sampler_arrays(engine)
     shutil.copytree(ROOT / "runtime_shared/player_tools", engine / "modules/player_tools")
     sdl = engine / "drivers/sdl/joypad_sdl.cpp"
     replace(sdl, '#include "joypad_sdl.h"', '#include "joypad_sdl.h"\n#ifdef IOS_ENABLED\nextern bool player_should_filter_controller();\n#else\nstatic bool player_should_filter_controller() { return false; }\n#endif')

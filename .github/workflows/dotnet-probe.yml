@@ -116,7 +116,7 @@ jobs:
           .cache/dotnet-proof-env/bin/pip install scons==4.10.1
           dotnet run --project tests/dotnet-metadata/Hollow.Metadata.Tests.csproj --configuration Release
           mkdir -p build/godot-dotnet-proof
-          .cache/dotnet-proof-env/bin/python tools/prove_godot_dotnet_ios.py .cache/godot-source build/godot-dotnet-proof --phase build 2>&1 | tee build/godot-dotnet-proof/build.log
+          .cache/dotnet-proof-env/bin/python tools/prove_godot_dotnet_ios.py .cache/godot-source build/godot-dotnet-proof --graphics --phase build 2>&1 | tee build/godot-dotnet-proof/build.log
       - name: Save compiled scene runner before executing the game
         if: steps.engine_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -127,7 +127,7 @@ jobs:
         timeout-minutes: 20
         run: |
           set -o pipefail
-          .cache/dotnet-proof-env/bin/python tools/prove_godot_dotnet_ios.py .cache/godot-source build/godot-dotnet-proof --phase run 2>&1 | tee build/godot-dotnet-proof/execution.log
+          .cache/dotnet-proof-env/bin/python tools/prove_godot_dotnet_ios.py .cache/godot-source build/godot-dotnet-proof --graphics --phase run 2>&1 | tee build/godot-dotnet-proof/execution.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -136,3 +136,4 @@ jobs:
             build/godot-dotnet-proof/*.json
             build/godot-dotnet-proof/*.log
             build/godot-dotnet-proof/*.ips
+            build/godot-dotnet-proof/*.png

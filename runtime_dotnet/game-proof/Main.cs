@@ -10,6 +10,7 @@ public partial class Main : Node2D
     private int frames;
     private Vector2 initial;
     private bool metadataReentryPassed;
+    private bool graphics;
 
     public override void _Ready()
     {
@@ -42,6 +43,34 @@ public partial class Main : Node2D
         initial = new Vector2(3, 4);
         Position = initial;
         AddChild(new Node { Name = "ManagedChild" });
+        graphics = DisplayServer.GetName() != "headless";
+        if (graphics)
+        {
+            var textures = new Godot.Collections.Array();
+            for (int i = 0; i < 5; i++)
+            {
+                using var image = Image.CreateEmpty(4, 4, false, Image.Format.Rgba8);
+                image.Fill(i == 3 ? Colors.Lime : Colors.Red);
+                textures.Add(ImageTexture.CreateFromImage(image));
+            }
+            var shader = new Shader { Code = """
+                shader_type canvas_item;
+                render_mode unshaded;
+                uniform sampler2D Masks[5] : filter_nearest;
+                uniform int selected = 3;
+                vec4 pick_mask(inout int slot, vec2 uv) { return texture(Masks[slot++], uv); }
+                void fragment() {
+                    int slot = selected;
+                    COLOR = pick_mask(slot, UV);
+                    COLOR.g *= float(slot - selected) * 0.25;
+                }
+                """ };
+            var material = new ShaderMaterial { Shader = shader };
+            material.SetShaderParameter("Masks", textures);
+            AddChild(new ColorRect { Size = new Vector2(128, 128), Color = Colors.White, Material = material });
+            AddChild(new ColorRect { Position = new Vector2(150, 0), Size = new Vector2(128, 128),
+                Material = new ShaderMaterial { Shader = new Shader { Code = "shader_type canvas_item; render_mode unshaded; void fragment(){COLOR=vec4(0.0,0.25,0.0,1.0);}" } } });
+        }
         GD.Print("HOLLOW_GODOT_DOTNET_READY: original C# scene instantiated");
     }
 
@@ -56,11 +85,22 @@ public partial class Main : Node2D
         string bclPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("user://"), "bcl-proof.txt");
         System.IO.File.WriteAllText(bclPath, "Hollow managed IO");
         passed &= System.IO.File.ReadAllText(bclPath) == "Hollow managed IO";
+        if (graphics)
+        {
+            using var image = GetViewport().GetTexture().GetImage();
+            var pixel = image.GetPixel(32, 32);
+            var expected = image.GetPixel(182, 32);
+            // Green proves sampler #3 was used; 0.25 proves slot++ ran once.
+            passed &= pixel.R < 0.02f && pixel.G > 0.1f && Math.Abs(pixel.G - expected.G) < 0.02f && pixel.B < 0.02f && pixel.A > 0.98f;
+            GD.Print("HOLLOW_SAMPLER_PIXEL: " + pixel);
+            GD.Print(passed ? "HOLLOW_SAMPLER_ARRAY_RENDER_PASS" : "HOLLOW_SAMPLER_ARRAY_RENDER_FAIL");
+            image.SavePng("user://sampler-proof.png");
+        }
         using var file = Godot.FileAccess.Open("user://dotnet-proof.json", Godot.FileAccess.ModeFlags.Write);
         if (file == null) throw new Exception("Godot save API did not open the proof record");
         file.StoreString("{\"passed\":" + (passed ? "true" : "false") + ",\"frames\":" + frames
             + ",\"coins\":" + Coins + ",\"godot_game_execution\":true,\"bcl_file_io\":true,\"metadata_reentry\":"
-            + (metadataReentryPassed ? "true" : "false") + ",\"unavailable_xr\":true,\"legacy_api\":true}");
+            + (metadataReentryPassed ? "true" : "false") + ",\"unavailable_xr\":true,\"legacy_api\":true,\"sampler_array_rendering\":" + (graphics ? "true" : "false") + "}");
         file.Close();
         GD.Print(passed ? "HOLLOW_GODOT_DOTNET_PASS" : "HOLLOW_GODOT_DOTNET_FAIL");
         GetTree().Quit(passed ? 0 : 1);

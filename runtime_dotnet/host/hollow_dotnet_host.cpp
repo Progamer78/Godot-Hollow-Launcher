@@ -134,6 +134,20 @@ extern void apple_embedded_finish();
 // includes no export plugins and supplies the same empty callbacks itself.
 void godot_apple_embedded_plugins_initialize() {}
 void godot_apple_embedded_plugins_deinitialize() {}
+extern "C" int HollowPrepareGodotGraphics(const char *executable, const char *pack, const char *log) {
+	setvbuf(stdout, nullptr, _IONBF, 0); setvbuf(stderr, nullptr, _IONBF, 0);
+	char *argv[] = { const_cast<char *>(executable), const_cast<char *>("--main-pack"), const_cast<char *>(pack),
+		const_cast<char *>("--log-file"), const_cast<char *>(log), const_cast<char *>("--rendering-method"),
+		const_cast<char *>("gl_compatibility"), const_cast<char *>("--rendering-driver"), const_cast<char *>("opengl3"), nullptr };
+	int result = apple_embedded_main(9, argv);
+	Logger::set_flush_stdout_on_print(true);
+	return result;
+}
+extern "C" const char *HollowGodotProofSavePath() {
+	static CharString path;
+	path = OS::get_singleton()->get_user_data_dir().path_join("dotnet-proof.json").utf8();
+	return path.get_data();
+}
 extern "C" int HollowRunGodotProof(const char *executable, const char *pack, const char *log) {
 	setvbuf(stdout, nullptr, _IONBF, 0); setvbuf(stderr, nullptr, _IONBF, 0);
 	// Upstream's change_to_launch_dir expects argv[0] to be an absolute path,

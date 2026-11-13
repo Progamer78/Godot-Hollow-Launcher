@@ -263,6 +263,7 @@ class BuildToolsTests(unittest.TestCase):
             "drivers/apple_embedded/SCsub",
             "drivers/sdl/joypad_sdl.cpp",
             "platform/ios/display_layer_ios.mm",
+            "servers/rendering/shader_compiler.cpp", "servers/rendering/shader_compiler.h",
         ]
         engine = ROOT / ".cache/godot-source"
         archive = ROOT / ".cache/source.zip"
