@@ -5,6 +5,7 @@
 #include "core/os/os.h"
 #include "core/string/print_string.h"
 #include <mono/jit/jit.h>
+#include <cstdio>
 
 extern "C" int coreclr_initialize(const char *, const char *, int, const char **, const char **, void **, unsigned int *);
 extern "C" void *mono_aot_module_System_Private_CoreLib_info;
@@ -97,10 +98,23 @@ extern int apple_embedded_main(int, char **);
 // includes no export plugins and supplies the same empty callbacks itself.
 void godot_apple_embedded_plugins_initialize() {}
 void godot_apple_embedded_plugins_deinitialize() {}
-extern "C" int HollowRunGodotProof(const char *pack, const char *log) {
-	char *argv[] = { const_cast<char *>("HollowGodotProof"), const_cast<char *>("--headless"), const_cast<char *>("--main-pack"), const_cast<char *>(pack), const_cast<char *>("--log-file"), const_cast<char *>(log), nullptr };
-	if (apple_embedded_main(6, argv) != 0 || Main::setup2(false) != OK || Main::start() != OK) return 1;
-	for (int frame = 0; frame < 300; frame++) { if (Main::iteration()) return 0; }
+extern "C" int HollowRunGodotProof(const char *executable, const char *pack, const char *log) {
+	setvbuf(stdout, nullptr, _IONBF, 0); setvbuf(stderr, nullptr, _IONBF, 0);
+	// Upstream's change_to_launch_dir expects argv[0] to be an absolute path,
+	// just as the working launcher supplies it.
+	char *argv[] = { const_cast<char *>(executable), const_cast<char *>("--headless"), const_cast<char *>("--main-pack"), const_cast<char *>(pack), const_cast<char *>("--log-file"), const_cast<char *>(log), nullptr };
+	int result = apple_embedded_main(6, argv);
+	fprintf(stderr, "HOLLOW_GODOT_SETUP: %d\n", result);
+	if (result != 0) return 100 + result;
+	Error phase2 = Main::setup2(false);
+	fprintf(stderr, "HOLLOW_GODOT_SETUP2: %d\n", int(phase2));
+	if (phase2 != OK) return 200 + int(phase2);
+	fprintf(stderr, "HOLLOW_GODOT_USER_DIR: %s\n", OS::get_singleton()->get_user_data_dir().utf8().get_data());
+	result = Main::start();
+	fprintf(stderr, "HOLLOW_GODOT_START: %d\n", result);
+	if (result != 0) return 300 + result;
+	for (int frame = 0; frame < 300; frame++) { if (Main::iteration()) { fprintf(stderr, "HOLLOW_GODOT_FINISHED: %d frames\n", frame); return 0; } }
+	fprintf(stderr, "HOLLOW_GODOT_FRAME_LIMIT\n");
 	return 2;
 }
 #endif

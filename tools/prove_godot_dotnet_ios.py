@@ -67,6 +67,9 @@ def execute(output):
         complete=documents / 'native-result.json';deadline=time.monotonic()+120
         while not complete.is_file() and time.monotonic()<deadline:time.sleep(0.25)
         if not complete.is_file():raise RuntimeError('Godot C# game did not complete; see native logs')
+        shutil.copyfile(complete,output / 'native-result.json')
+        native_result=json.loads(complete.read_text(encoding='utf-8'))
+        if native_result.get('native_result')!=0:raise RuntimeError('Godot startup/loop failed: ' + str(native_result))
         results=list(container.rglob('dotnet-proof.json'))
         if len(results)!=1:raise RuntimeError('Original game did not write its gameplay proof record')
         result=json.loads(results[0].read_text(encoding='utf-8'));result['scope']='Real Godot headless scene execution on ARM64 iOS Simulator; physical device and launcher integration untested'
