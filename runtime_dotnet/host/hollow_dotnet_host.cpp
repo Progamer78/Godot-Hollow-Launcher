@@ -45,9 +45,9 @@ static bool portable_il(const Vector<uint8_t> &bytes) {
 static bool windows_runtime_component(const String &name) {
 	// Standard self-contained .NET exports carry the Windows CLR, GC, JIT,
 	// host and debugging binaries. The trusted iOS Mono runtime replaces them.
-	const char *components[] = { "clretwrc.dll", "clrgc.dll", "clrjit.dll", "coreclr.dll", "hostfxr.dll", "hostpolicy.dll", "mscordaccore.dll", "mscordbi.dll", "mscorrc.dll", "msquic.dll" };
+	const char *components[] = { "clretwrc.dll", "clrgc.dll", "clrjit.dll", "coreclr.dll", "hostfxr.dll", "hostpolicy.dll", "mscordaccore.dll", "mscordbi.dll", "mscorrc.dll", "msquic.dll", "system.globalization.native.dll", "system.io.compression.native.dll", "system.native.dll", "system.net.security.native.dll", "system.security.cryptography.native.apple.dll", "system.security.cryptography.native.openssl.dll" };
 	for (const char *component : components) { if (name == component) return true; }
-	return name.begins_with("mscordaccore_") && name.ends_with(".dll");
+	return (name.begins_with("mscordaccore_") || name.begins_with("microsoft.diasymreader.native.")) && name.ends_with(".dll");
 }
 
 int hollow_dotnet_initialize(const char *, const char *, int, const char **, const char **, void **handle, unsigned int *domain) {

@@ -17,7 +17,7 @@ func _initialize():
 	assert(file != null)
 	file.store_buffer("MZWindows runtime placeholder; deliberately not a portable assembly".to_utf8_buffer())
 	file.close()
-	for name in ["coreclr.dll", "mscordaccore_amd64_amd64_8.0.1525.16413.dll", "WindowsBase.dll"]:
+	for name in ["coreclr.dll", "mscordaccore_amd64_amd64_8.0.1525.16413.dll", "WindowsBase.dll", "System.IO.Compression.Native.dll", "Microsoft.DiaSymReader.Native.amd64.dll"]:
 		assert(packer.add_file("res://.godot/mono/publish/x86_64/" + name, platform_stub) == OK)
 	assert(packer.flush() == OK)
 	print("HOLLOW_DOTNET_ORIGINAL_PACK_CREATED")
