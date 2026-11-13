@@ -158,6 +158,7 @@ jobs:
           PY
       - name: Patch and verify player integration
         run: |
+          python3 tools/check_ios_graphics.py .cache/godot-source build/ios-graphics
           python3 tools/patch_engine.py .cache/godot-source
           python3 tools/patch_dotnet.py .cache/godot-source
           python3 - <<'PY'
@@ -277,6 +278,7 @@ jobs:
             build/GodotPlayer-unsigned.ipa
             build/ipa-audit.json
             build/ios-archive-link/results.json
+            build/ios-graphics/results.json
             build/input-ui/results.json
             build/input-ui/*.log
             build/input-ui/*.png

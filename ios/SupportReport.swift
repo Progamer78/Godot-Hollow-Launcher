@@ -17,6 +17,14 @@ enum SupportReport {
                     .replacingOccurrences(of: NSHomeDirectory(), with: "<app>")
             }
         }
+        let startup = ["startup.log", "startup.previous.log"].compactMap { name -> [String: String]? in
+            let url = library.saveURL(game).appendingPathComponent(name)
+            guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
+            defer { try? file.close() }
+            // Stage records contain no game files or save contents.
+            guard let data = try? file.read(upToCount: 16384) else { return nil }
+            return ["file": name, "stages": String(decoding: data, as: UTF8.self)]
+        }
         let report: [String: Any] = [
             "schema": 1, "created": ISO8601DateFormatter().string(from: Date()),
             "app": "Godot Hollow Launcher", "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development",
@@ -27,7 +35,7 @@ enum SupportReport {
             "runtimeOverride": game.runtime, "renderer": game.renderer, "orientation": game.displayOrientation,
             "importNote": game.importNote ?? "Original standalone PCK",
             "compatibility": RuntimeSelection.problem(for: game) ?? "Candidate; runtime execution required",
-            "lastLaunchStatus": library.previousLaunch(game)?.status ?? "none", "diagnostics": diagnostics,
+            "lastLaunchStatus": library.previousLaunch(game)?.status ?? "none", "diagnostics": diagnostics, "startup": startup,
             "privacy": "No PCK, executable, save contents, library notes, or full log included. Review diagnostics before sharing."
         ]
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("Hollow-support-\(UUID().uuidString).json")

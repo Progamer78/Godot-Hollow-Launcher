@@ -10,6 +10,17 @@ func _initialize():
 	for name in ["project.godot", "Main.tscn", "Main.cs", "ReentryAvatar.cs", "reentry/Avatar.tscn", "reentry/Nested.tscn"]:
 		assert(packer.add_file("res://" + name, "res://" + name) == OK)
 	assert(packer.add_file("res://.godot/mono/publish/x86_64/HollowDotnetProof.dll", args[1]) == OK)
+	# Minimal original GST2/DXT1 cursor: one 4x4 opaque green block. This proves
+	# the native cursor path decodes VRAM compression without reading the GPU.
+	var cursor_path = args[0].get_base_dir().path_join("ProofCursor.ctex")
+	var cursor = FileAccess.open(cursor_path, FileAccess.WRITE)
+	cursor.store_buffer("GST2".to_ascii_buffer())
+	for value in [1, 4, 4, 0, 0, 0, 0, 0]: cursor.store_32(value)
+	cursor.store_32(0) # DATA_FORMAT_IMAGE
+	cursor.store_16(4); cursor.store_16(4); cursor.store_32(0); cursor.store_32(Image.FORMAT_DXT1)
+	cursor.store_16(0x07e0); cursor.store_16(0); cursor.store_32(0)
+	cursor.close()
+	assert(packer.add_file("res://ProofCursor.ctex", cursor_path) == OK)
 	# Self-contained Windows exports include CLR/JIT/debugger binaries and a
 	# desktop copy of framework assemblies. None may replace the trusted runtime.
 	var platform_stub = args[0].get_base_dir().path_join("windows-runtime-placeholder.dll")

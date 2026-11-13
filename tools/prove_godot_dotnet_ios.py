@@ -28,10 +28,11 @@ def build(engine, output):
     run(['dotnet','build',fixture / 'HollowDotnetProof.csproj','-c','Release','-o',compiled,
          '-p:BaseIntermediateOutputPath=' + str(output / 'Game-obj') + '/'])
     mono = stage(output / 'runtime', 'iossimulator-arm64', compiled / 'GodotSharp.dll')
+    shutil.copytree(ROOT / 'runtime_shared/player_tools', engine / 'modules/player_tools')
     patch(engine, proof=True)
     flags = ['platform=ios','simulator=yes','arch=arm64','target=template_release','module_mono_enabled=yes',
              'cache_path=' + str(ROOT / '.cache/hollow-dotnet-proof-cache'),'cache_limit=2',
-             'modules_enabled_by_default=no','vulkan=no','metal=no','opengl3=no','sdl=no',
+             'modules_enabled_by_default=no','module_player_tools_enabled=yes','module_bcdec_enabled=yes','vulkan=no','metal=no','opengl3=no','sdl=no',
              'disable_path_overrides=no','disable_3d=yes','debug_symbols=no','optimize=none','lto=none','-j' + str(min(4,os.cpu_count() or 3))]
     run([sys.executable,'-m','SCons',*flags], cwd=engine, timeout=2400, env={**os.environ,'HOLLOW_MONO_NATIVE': mono['native']})
     libraries = list((engine / 'bin').glob('libgodot*.ios.template_release.arm64.simulator.a'))

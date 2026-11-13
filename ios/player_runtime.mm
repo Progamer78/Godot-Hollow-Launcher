@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 #include <atomic>
 #include <cstring>
+#include "core/io/logger.h"
 #import "app_delegate_service.h"
 #import "godot_app_delegate.h"
 #import "godot_view_controller.h"
@@ -99,6 +100,18 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
         return nil;
     }
     attempted = YES;
+    // Independent of Godot's buffered logger: survives a hang in setup2 or
+    // scene loading. Keep the preceding attempt when retrying Safe Launch.
+    NSString *startup = [savePath stringByAppendingPathComponent:@"startup.log"];
+    NSString *previous = [savePath stringByAppendingPathComponent:@"startup.previous.log"];
+    NSFileManager *files = NSFileManager.defaultManager;
+    if ([files fileExistsAtPath:startup]) {
+        [files removeItemAtPath:previous error:nil];
+        [files moveItemAtPath:startup toPath:previous error:nil];
+    }
+    [files createFileAtPath:startup contents:[NSData data] attributes:nil];
+    player_save_path = [savePath copy];
+    [self recordStartupStage:[NSString stringWithFormat:@"Hollow %@; Godot %ld; requested renderer %@; beginning engine setup", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"development", (long)major, renderer]];
     player_orientation = [orientation copy];
     if (major == 3) {
         NSString *path = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"Godot3Runtime.framework/Godot3Runtime"];
@@ -142,9 +155,15 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
         }
     }
     if (!started) {
+        [self recordStartupStage:@"Engine setup failed"];
         if (error) *error = [NSError errorWithDomain:@"GodotPlayer" code:2 userInfo:@{NSLocalizedDescriptionKey:@"Godot project initialization failed. Close and reopen the app before trying again. See the game's Saves/player.log in Files."}];
         return nil;
     }
+    // Enable only through startup; restore the game's setting after its first
+    // frame so frequent game prints do not incur synchronous disk IO forever.
+    Logger::set_flush_stdout_on_print(true);
+    print_line("Godot Player: project configuration loaded; preparing game view.");
+    [self recordStartupStage:@"Project configuration loaded; preparing game view"];
     if (String(GLOBAL_GET("application/run/main_scene")).is_empty()) {
         if (error) *error = [NSError errorWithDomain:@"GodotPlayer" code:3 userInfo:@{NSLocalizedDescriptionKey:@"The pack has no main scene. It may be an incomplete or resource-only project. Close and reopen the app."}];
         return nil;
@@ -184,6 +203,20 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
     print_line(String("Godot Player: SpineSprite registered = ") + (ClassDB::class_exists("SpineSprite") ? "yes" : "no"));
     print_line(String("Godot Player: built-in LimboAI BTPlayer registered = ") + (ClassDB::class_exists("BTPlayer") ? "yes" : "no"));
     print_line("Godot Player: compiled GDScript tokenizer formats = 100, 101");
+}
+
++ (void)recordStartupStage:(NSString *)stage {
+    if (!player_save_path) return;
+    NSString *line = [NSString stringWithFormat:@"%@ %@\n", NSDate.date, stage];
+    NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:[player_save_path stringByAppendingPathComponent:@"startup.log"]];
+    if (!file) return;
+    @try {
+        [file seekToEndOfFile];
+        [file writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [file synchronizeFile];
+    } @catch (NSException *exception) {
+        NSLog(@"Could not write startup diagnostics: %@", exception.name);
+    } @finally { [file closeFile]; }
 }
 
 + (NSString *)launchFailureMessage {

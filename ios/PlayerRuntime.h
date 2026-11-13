@@ -17,6 +17,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)setKey:(NSString *)key pressed:(BOOL)pressed;
 + (void)releaseKeys;
 + (void)logRuntimeConfiguration;
++ (void)recordStartupStage:(NSString *)stage;
 + (NSString *)launchFailureMessage;
 + (void)setMouseEnabled:(BOOL)enabled;
 + (void)moveMouse:(CGPoint)point fromView:(UIView *)view relative:(BOOL)relative NS_SWIFT_NAME(moveMouse(_:from:relative:));

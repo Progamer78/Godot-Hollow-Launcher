@@ -11,6 +11,7 @@ import zipfile
 from unittest.mock import patch as mock_patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
 
 
 def module(name):
@@ -261,6 +262,7 @@ class BuildToolsTests(unittest.TestCase):
             "drivers/apple_embedded/display_server_apple_embedded.mm",
             "drivers/apple_embedded/SCsub",
             "drivers/sdl/joypad_sdl.cpp",
+            "platform/ios/display_layer_ios.mm",
         ]
         engine = ROOT / ".cache/godot-source"
         archive = ROOT / ".cache/source.zip"

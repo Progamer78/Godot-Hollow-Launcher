@@ -200,7 +200,7 @@ final class MouseTouchView: UIView {
             cursorRevision = revision
             cursor.image = PlayerRuntime.mouseCursorImage()
             arrow.isHidden = cursor.image != nil
-            hotspot = PlayerRuntime.mouseCursorHotspot()
+            hotspot = cursor.image == nil ? .zero : PlayerRuntime.mouseCursorHotspot()
         }
         let point = PlayerRuntime.mousePosition(in: self)
         let size = cursor.image?.size ?? CGSize(width: 24, height: 30)

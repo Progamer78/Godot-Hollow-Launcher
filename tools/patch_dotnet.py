@@ -1,4 +1,4 @@
-"""Enable the isolated Mono/Godot proof; ordinary IPA builds do not apply this."""
+"""Install the trusted Mono host, with an optional isolated test entry point."""
 from pathlib import Path
 import argparse
 import shutil
@@ -38,6 +38,7 @@ GDMono *GDMono::singleton = nullptr;''')
     # The proof has a small UIKit entry point and runs the actual engine in
     # headless mode. Keep this change confined to the experimental source tree.
     if proof:
+        shutil.copyfile(ROOT / 'ios/player_cursor_image.h', mono / 'mono_gd/player_cursor_image.h')
         replace(engine / 'drivers/apple_embedded/SCsub',
                 'env_apple_embedded.add_source_files(env_apple_embedded.drivers_sources, "*.swift")',
                 '# UIKit proof supplies main; ordinary Hollow builds retain SwiftUI.')

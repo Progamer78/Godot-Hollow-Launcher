@@ -2,6 +2,7 @@
 from pathlib import Path
 import argparse
 import shutil
+from patch_ios_graphics import patch as patch_ios_graphics
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH_REVISION = "hollow-swift-shared-dependencies-v12"
@@ -18,6 +19,7 @@ def patch(engine):
     apple = engine / "drivers/apple_embedded"
     if "import SwiftUI" not in (apple / "app.swift").read_text(encoding="utf-8"):
         raise RuntimeError("Expected an unmodified official Apple entry point; refusing to patch twice.")
+    patch_ios_graphics(engine)
     shutil.copytree(ROOT / "runtime_shared/player_tools", engine / "modules/player_tools")
     sdl = engine / "drivers/sdl/joypad_sdl.cpp"
     replace(sdl, '#include "joypad_sdl.h"', '#include "joypad_sdl.h"\n#ifdef IOS_ENABLED\nextern bool player_should_filter_controller();\n#else\nstatic bool player_should_filter_controller() { return false; }\n#endif')
@@ -98,22 +100,33 @@ def patch(engine):
     replace(renderer, '#import "godot_view_renderer.h"',
         '#import "godot_view_renderer.h"\n#import "app_delegate_service.h"\n#import "godot_view_controller.h"\n#import "PlayerRuntime.h"\nextern BOOL player_main_started;')
     replace(renderer, "@property(assign, nonatomic) BOOL hasFinishedSetup;",
-        "@property(assign, nonatomic) BOOL hasFinishedSetup;\n@property(assign, nonatomic) BOOL playerSetupFailed;")
+        "@property(assign, nonatomic) BOOL hasFinishedSetup;\n@property(assign, nonatomic) BOOL playerSetupFailed;\n@property(assign, nonatomic) BOOL playerFirstFrame;")
     replace(renderer, "\tif (self.hasFinishedSetup) {", "\tif (self.playerSetupFailed) return YES;\n\tif (self.hasFinishedSetup) {")
     replace(renderer, "\tMain::setup2();",
+        '\t[PlayerRuntime recordStartupStage:@"Initializing graphics, resources and scripting (setup2)"];\n'
         '\tif (Main::setup2() != OK) {\n\t\t[self playerFailed:@"Godot rendering or project setup failed. See player.log, then close and reopen the app."];\n\t\treturn;\n\t}\n'
+        '\t[PlayerRuntime recordStartupStage:@"Graphics and scripting initialized"];\n'
         "\t// Play occurs after the scene became active; replay initial focus only\n"
         "\t// after audio and rendering subsystems have initialized.\n"
         "\tOS_AppleEmbedded::get_singleton()->on_focus_in();\n"
         "\t[PlayerRuntime logRuntimeConfiguration];")
     replace(renderer, "\t\tOS_AppleEmbedded::get_singleton()->start();",
+        '\t\t[PlayerRuntime recordStartupStage:@"Loading main scene and initializing game nodes"];\n'
         '\t\tOS_AppleEmbedded::get_singleton()->start();\n'
+        '\t\t[PlayerRuntime recordStartupStage:@"Main scene initialization returned"];\n'
         '\t\tif (!player_main_started || !OS::get_singleton()->get_main_loop()) [self playerFailed:[PlayerRuntime launchFailureMessage]];')
     replace(renderer, "- (void)renderOnView:(UIView *)view {",
         "- (void)renderOnView:(UIView *)view {\n\tif (self.playerSetupFailed) return;")
     replace(renderer, "\tOS_AppleEmbedded::get_singleton()->iterate();\n}\n\n@end",
-        "\tOS_AppleEmbedded::get_singleton()->iterate();\n}\n\n" +
+        '\tOS_AppleEmbedded::get_singleton()->iterate();\n'
+        '\tif (!self.playerFirstFrame) {\n'
+        '\t\tself.playerFirstFrame = YES;\n'
+        '\t\t[PlayerRuntime recordStartupStage:@"First game frame completed"];\n'
+        '\t\tprint_line("Godot Player: first game frame completed.");\n'
+        '\t\tLogger::set_flush_stdout_on_print(GLOBAL_GET("application/run/flush_stdout_on_print"));\n'
+        '\t}\n}\n\n' +
         '- (void)playerFailed:(NSString *)message {\n'
+        '\t[PlayerRuntime recordStartupStage:message];\n'
         '\tself.playerSetupFailed = YES;\n'
         '\tdispatch_async(dispatch_get_main_queue(), ^{\n'
         '\t\tUIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Game launch failed" message:message preferredStyle:UIAlertControllerStyleAlert];\n'
@@ -148,7 +161,7 @@ def patch(engine):
     # iOS has touch input but upstream does not implement desktop mouse APIs.
     # Keep the ordinary engine Input event path and expose virtual mouse state.
     display_header = apple / "display_server_apple_embedded.h"
-    replace(display_header, '#include "core/os/thread_safe.h"', '#include "core/os/thread_safe.h"\n#include "core/input/input.h"')
+    replace(display_header, '#include "core/os/thread_safe.h"', '#include "core/os/thread_safe.h"\n#include "core/input/input.h"\n#include "player_cursor_image.h"')
 
     # The native host controls rotation and fits the render surface in portrait.
     # Games may request orientation changes, but cannot override that preference.

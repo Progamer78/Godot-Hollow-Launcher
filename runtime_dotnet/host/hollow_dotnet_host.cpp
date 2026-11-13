@@ -125,6 +125,7 @@ int hollow_dotnet_initialize(const char *, const char *, int, const char **, con
 }
 
 #ifdef HOLLOW_DOTNET_PROOF
+#include "player_cursor_image.h"
 #include "main/main.h"
 #include "core/os/main_loop.h"
 extern int apple_embedded_main(int, char **);
@@ -144,6 +145,15 @@ extern "C" int HollowRunGodotProof(const char *executable, const char *pack, con
 	Error phase2 = Main::setup2(false);
 	fprintf(stderr, "HOLLOW_GODOT_SETUP2: %d\n", int(phase2));
 	if (phase2 != OK) return 200 + int(phase2);
+	// CPU cursor decoding must work before any rendered frame or GPU readback.
+	{
+		Ref<CompressedTexture2D> cursor;
+		cursor.instantiate();
+		if (cursor->load("res://ProofCursor.ctex") != OK) return 410;
+		Ref<Image> image = player_read_imported_cursor(cursor);
+		if (image.is_null() || image->is_compressed() || image->get_width() != 4 || image->get_height() != 4 || image->get_pixel(0, 0) != Color(0, 1, 0, 1)) return 411;
+		fprintf(stderr, "HOLLOW_CPU_CURSOR_PASS: VRAM-compressed cursor decoded before first frame\n");
+	}
 	fprintf(stderr, "HOLLOW_GODOT_USER_DIR: %s\n", OS::get_singleton()->get_user_data_dir().utf8().get_data());
 	result = Main::start();
 	fprintf(stderr, "HOLLOW_GODOT_START: %d\n", result);

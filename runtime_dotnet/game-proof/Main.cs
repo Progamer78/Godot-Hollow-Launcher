@@ -13,6 +13,14 @@ public partial class Main : Node2D
 
     public override void _Ready()
     {
+        // Match desktop games which assume an OpenXR interface always exists,
+        // including on a phone without a VR runtime. It must report unavailable.
+        var xr = XRServer.FindInterface("OpenXR");
+        if (xr.IsInitialized() || xr.Initialize() || xr.GetCapabilities() != 0 || xr.IsPrimary())
+            throw new Exception("Unavailable OpenXR interface incorrectly reports VR support");
+        if (XRServer.FindInterface("UnregisteredProofInterface") != null)
+            throw new Exception("Unknown XR interfaces must still return null");
+        GD.Print("HOLLOW_UNAVAILABLE_XR_PASS");
         var discovered = ReentryLoader.Load("res://reentry/Avatar.tscn", "res://reentry/Nested.tscn");
         if (discovered.Count != 2 || ReentryLoader.NestedLoads != 1)
             throw new Exception("Script metadata eagerly initialized the avatar during scene enumeration");
@@ -45,7 +53,7 @@ public partial class Main : Node2D
         if (file == null) throw new Exception("Godot save API did not open the proof record");
         file.StoreString("{\"passed\":" + (passed ? "true" : "false") + ",\"frames\":" + frames
             + ",\"coins\":" + Coins + ",\"godot_game_execution\":true,\"bcl_file_io\":true,\"metadata_reentry\":"
-            + (metadataReentryPassed ? "true" : "false") + "}");
+            + (metadataReentryPassed ? "true" : "false") + ",\"unavailable_xr\":true}");
         file.Close();
         GD.Print(passed ? "HOLLOW_GODOT_DOTNET_PASS" : "HOLLOW_GODOT_DOTNET_FAIL");
         GetTree().Quit(passed ? 0 : 1);
