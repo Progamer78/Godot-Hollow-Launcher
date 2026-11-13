@@ -1,0 +1,26 @@
+name: Probe iOS managed interpreter
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  interpreter:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build device and simulator interpreter probes
+        run: |
+          set -o pipefail
+          mkdir -p build/dotnet-probe
+          python3 tools/prove_dotnet_ios.py build/dotnet-probe 2>&1 | tee build/dotnet-probe/build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Hollow-dotnet-interpreter-probe
+          path: |
+            build/dotnet-probe/*.json
+            build/dotnet-probe/*.log
