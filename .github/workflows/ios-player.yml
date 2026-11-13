@@ -53,7 +53,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .cache/hollow-engine-cache
-          key: ${{ runner.os }}-${{ runner.arch }}-hollow-scons-v1-${{ steps.toolchain.outputs.fingerprint }}-${{ env.SPINE_RUNTIME }}-${{ hashFiles('ios/**', 'runtime3/**', 'runtime_shared/**', 'tools/patch*.py', 'tools/prepare*.py', '.github/workflows/ios-player.yml') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-hollow-scons-v1-${{ steps.toolchain.outputs.fingerprint }}-${{ env.SPINE_RUNTIME }}-${{ hashFiles('ios/**', 'runtime3/**', 'runtime_shared/**', 'runtime_dotnet/host/**', 'tools/patch*.py', 'tools/prepare*.py', 'tools/stage_dotnet_runtime.py', '.github/workflows/ios-player.yml') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-hollow-scons-v1-${{ steps.toolchain.outputs.fingerprint }}-${{ env.SPINE_RUNTIME }}-
       - name: Setup matching official Godot and export templates
@@ -141,9 +141,20 @@ jobs:
           python3 -m unittest discover -s tests -v
       - name: Stage legacy script compatibility and built-in AI runtime
         run: python3 tools/prepare_compatibility.py .cache/godot-source .cache/limboai
+      - name: Stage the trusted iOS C# interpreter and matching Godot API
+        run: |
+          python3 tools/stage_dotnet_runtime.py build/dotnet-runtime --rid ios-arm64
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          stage = json.loads(Path('build/dotnet-runtime/stage.json').read_text(encoding='utf-8'))
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
+              out.write('HOLLOW_MONO_NATIVE=' + stage['native'] + '\n')
+          PY
       - name: Patch and verify player integration
         run: |
           python3 tools/patch_engine.py .cache/godot-source
+          python3 tools/patch_dotnet.py .cache/godot-source
           python3 - <<'PY'
           from pathlib import Path
           renderer = Path('.cache/godot-source/drivers/apple_embedded/godot_view_renderer.mm')
@@ -201,6 +212,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/.cache/hollow-engine-cache"
           cd .cache/godot-source
           runtime_flags=(platform=ios target=template_release arch=arm64
+            module_mono_enabled=yes
             "cache_path=$GITHUB_WORKSPACE/.cache/hollow-engine-cache/godot4" cache_limit=3
             disable_path_overrides=no vulkan=no metal=yes opengl3=yes
             debug_symbols=no optimize=size -j"$(sysctl -n hw.logicalcpu)")
@@ -228,12 +240,14 @@ jobs:
             spine_notice=(--spine-license build/SPINE-RUNTIMES-LICENSE.txt)
           fi
           python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a "${spine_notice[@]}" --compatibility-license build/COMPATIBILITY-LICENSES.txt --spine-version "$SPINE_RUNTIME"
+          python3 tools/install_dotnet_runtime.py prepare build/ios build/dotnet-runtime/stage.json
       - name: Build Xcode archive (unsigned)
         run: |
           set -o pipefail
           xcodebuild archive \
             -project build/ios/player.xcodeproj \
             -scheme player -sdk iphoneos -configuration Release \
+            -xcconfig build/ios/dotnet-link.xcconfig \
             -archivePath build/ios/player.xcarchive \
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_STYLE=Manual DEVELOPMENT_TEAM="" \
@@ -244,6 +258,7 @@ jobs:
           mkdir -p build/package/Payload
           cp -R build/ios/player.xcarchive/Products/Applications/*.app build/package/Payload/
           python3 tools/install_godot3_framework.py build/package/Payload build/runtime3/Godot3Runtime.framework
+          python3 tools/install_dotnet_runtime.py install build/package/Payload build/dotnet-runtime/stage.json
           cd build/package
           zip -qr ../GodotPlayer-unsigned.ipa Payload
           cd ../..
