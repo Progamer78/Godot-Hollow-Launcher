@@ -48,10 +48,28 @@ def prove(output):
             target = app / library.name; shutil.copyfile(library, target)
             if rid == "iossimulator-arm64": run(["codesign", "--force", "--sign", "-", target])
         sdk_path = subprocess.check_output(["xcrun", "--sdk", sdk, "--show-sdk-path"], text=True).strip()
+        compiler_package = "microsoft.netcore.app.runtime.aot.osx-arm64.cross." + rid
+        compiler_zip = output / (compiler_package + ".nupkg")
+        if not compiler_zip.is_file():
+            with urllib.request.urlopen(f"https://api.nuget.org/v3-flatcontainer/{compiler_package}/{VERSION}/{compiler_package}.{VERSION}.nupkg", timeout=90) as response, compiler_zip.open("wb") as target:
+                shutil.copyfileobj(response, target)
+        compiler_root = output / (rid + "-compiler")
+        with zipfile.ZipFile(compiler_zip) as z:
+            for member in z.infolist():
+                if not (compiler_root / member.filename).resolve().is_relative_to(compiler_root.resolve()): raise RuntimeError("Unsafe compiler package path")
+            z.extractall(compiler_root)
+        compiler = next(compiler_root.rglob("mono-aot-cross")); compiler.chmod(0o755)
+        aot_objects = []
+        for name in ["System.Private.CoreLib", "HollowManagedProbe"]:
+            assembly = managed / (name + ".dll")
+            asm = output / (rid + "-" + name + ".s"); obj = asm.with_suffix(".o")
+            run([compiler, "--aot=static,asmonly,interp,outfile=" + str(asm), assembly], env={**__import__("os").environ, "MONO_PATH": str(managed)})
+            run(["xcrun", "--sdk", sdk, "clang", "-target", triple, "-isysroot", sdk_path, "-c", asm, "-o", obj])
+            aot_objects.append(obj)
         libraries = [native / "libmonosgen-2.0.a", native / "libmono-component-marshal-ilgen-static.a"]
         libraries += [native / ("libmono-component-" + name + "-stub-static.a") for name in ["debugger", "diagnostics_tracing", "hot_reload"]]
         command = ["xcrun", "--sdk", sdk, "clang", "-target", triple, "-isysroot", sdk_path, "-fobjc-arc", "-O1",
-                   "-I" + str(native / "include/mono-2.0"), sources / "main.m"]
+                   "-I" + str(native / "include/mono-2.0"), sources / "main.m", *aot_objects]
         for library in libraries: command += ["-Wl,-force_load," + str(library)]
         command += ["-lc++", "-lz", "-liconv", "-framework", "UIKit", "-framework", "Foundation", "-framework", "Security", "-framework", "SystemConfiguration", "-o", app / "HollowMonoProbe"]
         run(command)
@@ -66,7 +84,7 @@ def prove(output):
         run(["xcrun", "simctl", "boot", device]); run(["xcrun", "simctl", "bootstatus", device, "-b"])
         run(["xcrun", "simctl", "install", device, output / "iossimulator-arm64.app"])
         container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container", device, "org.godotplayer.monoprobe", "data"], text=True).strip())
-        run(["xcrun", "simctl", "launch", device, "org.godotplayer.monoprobe"])
+        run(["xcrun", "simctl", "launch", "--stdout=" + str(output / "stdout.log"), "--stderr=" + str(output / "stderr.log"), device, "org.godotplayer.monoprobe"])
         record = container / "Documents/probe-result.json"; deadline = time.monotonic() + 90
         while not record.is_file() and time.monotonic() < deadline: time.sleep(0.25)
         if not record.is_file(): raise RuntimeError("Interpreter process produced no completion record")
@@ -74,6 +92,11 @@ def prove(output):
         result = json.loads(record.read_text())
         if not result["passed"]: raise RuntimeError(result["message"])
     finally:
+        if 'container' in locals():
+            phase = container / "Documents/probe-stage.log"
+            if phase.is_file(): shutil.copyfile(phase, output / "phase.log")
+        for path in (Path.home() / "Library/Logs/DiagnosticReports").glob("HollowMonoProbe*"):
+            shutil.copyfile(path, output / ("crash-" + path.name))
         logs = subprocess.run(["xcrun", "simctl", "spawn", device, "log", "show", "--last", "4m", "--style", "compact", "--predicate", "process == 'HollowMonoProbe'"], capture_output=True, text=True, timeout=30)
         (output / "simulator.log").write_text(logs.stdout + logs.stderr)
         from check_input_ui import cleanup_device

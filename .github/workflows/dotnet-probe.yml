@@ -25,3 +25,4 @@ jobs:
           path: |
             build/dotnet-probe/*.json
             build/dotnet-probe/*.log
+            build/dotnet-probe/*.ips
