@@ -6,7 +6,7 @@ from patch_engine import replace
 
 ROOT = Path(__file__).resolve().parents[1]
 
-def patch(engine):
+def patch(engine, proof=False):
     mono = engine / 'modules/mono'
     shutil.copyfile(ROOT / 'runtime_dotnet/host/hollow_dotnet_host.cpp', mono / 'mono_gd/hollow_dotnet_host.cpp')
     cpp = mono / 'mono_gd/gd_mono.cpp'
@@ -26,7 +26,8 @@ GDMono *GDMono::singleton = nullptr;''')
     replace(cpp, 'return OS::get_singleton()->has_feature("dotnet");', 'return !String(ProjectSettings::get_singleton()->get_setting("dotnet/project/assembly_name", "")).is_empty();')
     scsub = mono / 'SCsub'
     with scsub.open('a', encoding='utf-8') as target:
-        target.write('\nimport os\nenv_mono.Append(CPPPATH=[os.environ["HOLLOW_MONO_NATIVE"] + "/include/mono-2.0"])\nenv_mono.Append(CPPDEFINES=["HOLLOW_DOTNET_PROOF"])\n')
+        target.write('\nimport os\nenv_mono.Append(CPPPATH=[os.environ["HOLLOW_MONO_NATIVE"] + "/include/mono-2.0"])\n')
+        if proof: target.write('env_mono.Append(CPPDEFINES=["HOLLOW_DOTNET_PROOF"])\n')
     # The cloned module environment must receive its include flags before files
     # are registered with the builders.
     text = scsub.read_text(encoding='utf-8')
@@ -36,10 +37,11 @@ GDMono *GDMono::singleton = nullptr;''')
     scsub.write_text(text, encoding='utf-8')
     # The proof has a small UIKit entry point and runs the actual engine in
     # headless mode. Keep this change confined to the experimental source tree.
-    replace(engine / 'drivers/apple_embedded/SCsub',
-            'env_apple_embedded.add_source_files(env_apple_embedded.drivers_sources, "*.swift")',
-            '# UIKit proof supplies main; ordinary Hollow builds retain SwiftUI.')
+    if proof:
+        replace(engine / 'drivers/apple_embedded/SCsub',
+                'env_apple_embedded.add_source_files(env_apple_embedded.drivers_sources, "*.swift")',
+                '# UIKit proof supplies main; ordinary Hollow builds retain SwiftUI.')
 
 if __name__ == '__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('engine',type=Path)
-    patch(parser.parse_args().engine.resolve())
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('engine',type=Path);parser.add_argument('--proof',action='store_true')
+    args=parser.parse_args();patch(args.engine.resolve(),proof=args.proof)
