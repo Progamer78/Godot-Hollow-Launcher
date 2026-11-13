@@ -76,7 +76,7 @@ def execute(output):
     container=None
     try:
         run(['xcrun','simctl','boot',device]);run(['xcrun','simctl','bootstatus',device,'-b'],timeout=300)
-        run(['xcrun','simctl','install',device,app],timeout=180)
+        run(['xcrun','simctl','install',device,app],timeout=300)
         container=Path(capture(['xcrun','simctl','get_app_container',device,'org.godotplayer.dotnetgameproof','data'],text=True).strip())
         documents=container / 'Documents'; documents.mkdir(exist_ok=True);shutil.copyfile(pack,documents / 'game.pck')
         run(['xcrun','simctl','launch','--stdout=' + str(output / 'stdout.log'),'--stderr=' + str(output / 'stderr.log'),device,'org.godotplayer.dotnetgameproof'],timeout=180)

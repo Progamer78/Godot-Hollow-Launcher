@@ -9,6 +9,7 @@ public partial class Main : Node2D
     [Export] public bool DoorOpen { get; set; } = false;
     private int frames;
     private Vector2 initial;
+    private bool metadataReentryPassed;
 
     public override void _Ready()
     {
@@ -21,6 +22,7 @@ public partial class Main : Node2D
                 || !avatar.HasSignal("ReadyForPlay"))
                 throw new Exception("Normal avatar initialization or exported metadata was lost");
         }
+        metadataReentryPassed = true;
         GD.Print("HOLLOW_METADATA_REENTRY_PASS");
         initial = new Vector2(3, 4);
         Position = initial;
@@ -34,7 +36,7 @@ public partial class Main : Node2D
         if (++frames != 8) return;
         var values = new Dictionary<string, int> { ["coins"] = Coins, ["bonus"] = 2 };
         Coins = values.Values.Sum(); DoorOpen = Coins == 42;
-        bool passed = DoorOpen && Position.X == initial.X + 8 && GetNode("ManagedChild") != null
+        bool passed = metadataReentryPassed && DoorOpen && Position.X == initial.X + 8 && GetNode("ManagedChild") != null
             && (int)Get("Coins") == 42 && (bool)Get("DoorOpen");
         string bclPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("user://"), "bcl-proof.txt");
         System.IO.File.WriteAllText(bclPath, "Hollow managed IO");
@@ -42,7 +44,8 @@ public partial class Main : Node2D
         using var file = Godot.FileAccess.Open("user://dotnet-proof.json", Godot.FileAccess.ModeFlags.Write);
         if (file == null) throw new Exception("Godot save API did not open the proof record");
         file.StoreString("{\"passed\":" + (passed ? "true" : "false") + ",\"frames\":" + frames
-            + ",\"coins\":" + Coins + ",\"godot_game_execution\":true,\"bcl_file_io\":true,\"metadata_reentry\":true}");
+            + ",\"coins\":" + Coins + ",\"godot_game_execution\":true,\"bcl_file_io\":true,\"metadata_reentry\":"
+            + (metadataReentryPassed ? "true" : "false") + "}");
         file.Close();
         GD.Print(passed ? "HOLLOW_GODOT_DOTNET_PASS" : "HOLLOW_GODOT_DOTNET_FAIL");
         GetTree().Quit(passed ? 0 : 1);
