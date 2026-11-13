@@ -10,6 +10,7 @@ func _initialize():
 	for name in ["project.godot", "Main.tscn", "Main.cs", "ReentryAvatar.cs", "reentry/Avatar.tscn", "reentry/Nested.tscn"]:
 		assert(packer.add_file("res://" + name, "res://" + name) == OK)
 	assert(packer.add_file("res://.godot/mono/publish/x86_64/HollowDotnetProof.dll", args[1]) == OK)
+	assert(packer.add_file("res://.godot/mono/publish/x86_64/HollowLegacyProof.dll", args[1].get_base_dir().path_join("HollowLegacyProof.dll")) == OK)
 	# Minimal original GST2/DXT1 cursor: one 4x4 opaque green block. This proves
 	# the native cursor path decodes VRAM compression without reading the GPU.
 	var cursor_path = args[0].get_base_dir().path_join("ProofCursor.ctex")

@@ -12,6 +12,7 @@ from prove_dotnet_ios import VERSION, run
 GODOT_VERSION = '4.7.2'
 
 def package(name, output, version=VERSION):
+    output.mkdir(parents=True, exist_ok=True)
     archive = output / (name + '.' + version + '.nupkg')
     if not archive.is_file():
         temporary = archive.with_suffix('.download')
@@ -37,8 +38,9 @@ def stage(output, rid, api=None):
         for dll in folder.glob('*.dll'): shutil.copyfile(dll, managed / dll.name)
     shutil.copyfile(api, managed / 'GodotSharp.dll')
     adapted = output / 'GodotSharp.metadata-compatible.dll'
+    legacy = package('godotsharp', output / 'compatibility-4.6.1', '4.6.1') / 'lib/net8.0/GodotSharp.dll'
     run(['dotnet', 'run', '--project', Path(__file__).resolve().parents[1] / 'runtime_dotnet/api-patcher/Hollow.ApiPatcher.csproj',
-         '--configuration', 'Release', '--', managed / 'GodotSharp.dll', adapted])
+         '--configuration', 'Release', '--', managed / 'GodotSharp.dll', adapted, legacy])
     shutil.copyfile(adapted, managed / 'GodotSharp.dll')
     shutil.copyfile(output / 'Hollow.MetadataBridge.dll', managed / 'Hollow.MetadataBridge.dll')
     for dylib in native.glob('libSystem.*.dylib'): shutil.copyfile(dylib, bundle / dylib.name)

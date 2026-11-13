@@ -26,7 +26,7 @@ def build(engine, output):
     fixture = ROOT / 'runtime_dotnet/game-proof'
     compiled = output / 'Game'
     run(['dotnet','build',fixture / 'HollowDotnetProof.csproj','-c','Release','-o',compiled,
-         '-p:BaseIntermediateOutputPath=' + str(output / 'Game-obj') + '/'])
+         '--artifacts-path', output / 'Game-artifacts'])
     mono = stage(output / 'runtime', 'iossimulator-arm64', compiled / 'GodotSharp.dll')
     shutil.copytree(ROOT / 'runtime_shared/player_tools', engine / 'modules/player_tools')
     patch(engine, proof=True)

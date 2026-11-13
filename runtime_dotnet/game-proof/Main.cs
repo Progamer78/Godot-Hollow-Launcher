@@ -13,6 +13,13 @@ public partial class Main : Node2D
 
     public override void _Ready()
     {
+        using (var animation = new Animation())
+        {
+            LegacyApiCalls.WriteAnimationLength(animation, 0.75f);
+            if (LegacyApiCalls.ReadAnimationLength(animation) != 0.75f || animation.Length != 0.75)
+                throw new Exception("Historical C# animation signatures did not resolve");
+        }
+        GD.Print("HOLLOW_LEGACY_API_PASS");
         // Match desktop games which assume an OpenXR interface always exists,
         // including on a phone without a VR runtime. It must report unavailable.
         var xr = XRServer.FindInterface("OpenXR");
@@ -53,7 +60,7 @@ public partial class Main : Node2D
         if (file == null) throw new Exception("Godot save API did not open the proof record");
         file.StoreString("{\"passed\":" + (passed ? "true" : "false") + ",\"frames\":" + frames
             + ",\"coins\":" + Coins + ",\"godot_game_execution\":true,\"bcl_file_io\":true,\"metadata_reentry\":"
-            + (metadataReentryPassed ? "true" : "false") + ",\"unavailable_xr\":true}");
+            + (metadataReentryPassed ? "true" : "false") + ",\"unavailable_xr\":true,\"legacy_api\":true}");
         file.Close();
         GD.Print(passed ? "HOLLOW_GODOT_DOTNET_PASS" : "HOLLOW_GODOT_DOTNET_FAIL");
         GetTree().Quit(passed ? 0 : 1);
