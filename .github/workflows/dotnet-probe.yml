@@ -75,6 +75,24 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Identify proof compiler and SDK
+        id: toolchain
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, subprocess
+          commands = [['xcodebuild', '-version'], ['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-version'], ['xcrun', 'clang', '--version']]
+          version = '\n'.join(subprocess.check_output(command, text=True) for command in commands)
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write('fingerprint=' + hashlib.sha256(version.encode()).hexdigest()[:16] + '\n')
+          PY
+      - name: Restore C# scene runner compiler cache
+        id: engine_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/hollow-dotnet-proof-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-hollow-dotnet-proof-v1-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('runtime_dotnet/**', 'tools/patch_dotnet.py', 'tools/prove_godot_dotnet_ios.py', 'tools/stage_dotnet_runtime.py') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-hollow-dotnet-proof-v1-${{ steps.toolchain.outputs.fingerprint }}-
       - uses: actions/checkout@v4
         with:
           repository: godotengine/godot
@@ -90,6 +108,7 @@ jobs:
           use-dotnet: false
           include-templates: false
       - name: Build the native Godot and Mono scene runner
+        id: engine_build
         timeout-minutes: 15
         run: |
           set -o pipefail
@@ -97,6 +116,12 @@ jobs:
           .cache/dotnet-proof-env/bin/pip install scons==4.10.1
           mkdir -p build/godot-dotnet-proof
           .cache/dotnet-proof-env/bin/python tools/prove_godot_dotnet_ios.py .cache/godot-source build/godot-dotnet-proof --phase build 2>&1 | tee build/godot-dotnet-proof/build.log
+      - name: Save compiled scene runner before executing the game
+        if: steps.engine_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/hollow-dotnet-proof-cache
+          key: ${{ steps.engine_cache.outputs.cache-primary-key }}
       - name: Execute the independent C# game on iOS Simulator
         timeout-minutes: 20
         run: |
