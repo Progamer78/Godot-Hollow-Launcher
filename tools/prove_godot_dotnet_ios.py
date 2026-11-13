@@ -15,10 +15,14 @@ from patch_dotnet import patch
 ROOT = Path(__file__).resolve().parents[1]
 
 def capture(command, **kwargs):
-    return subprocess.check_output(command, timeout=60, **kwargs)
+    # Fresh hosted CoreSimulator services can spend over two minutes mounting
+    # runtime images on their first query (runner-images issue 15247).
+    return subprocess.check_output(command, timeout=180, **kwargs)
 
 def build(engine, output):
     output.mkdir(parents=True,exist_ok=True)
+    with (output / 'simulator-prewarm.log').open('wb') as log:
+        prewarm = subprocess.Popen(['xcrun','simctl','list','runtimes','--json'],stdout=log,stderr=subprocess.STDOUT)
     fixture = ROOT / 'runtime_dotnet/game-proof'
     compiled = output / 'Game'
     run(['dotnet','build',fixture / 'HollowDotnetProof.csproj','-c','Release','-o',compiled,
@@ -27,7 +31,7 @@ def build(engine, output):
     patch(engine, proof=True)
     flags = ['platform=ios','simulator=yes','arch=arm64','target=template_release','module_mono_enabled=yes',
              'modules_enabled_by_default=no','vulkan=no','metal=no','opengl3=no','sdl=no',
-             'disable_3d=yes','debug_symbols=no','optimize=none','lto=none','-j8']
+             'disable_3d=yes','debug_symbols=no','optimize=none','lto=none','-j' + str(min(4,os.cpu_count() or 3))]
     run([sys.executable,'-m','SCons',*flags], cwd=engine, timeout=2400, env={**os.environ,'HOLLOW_MONO_NATIVE': mono['native']})
     libraries = list((engine / 'bin').glob('libgodot*.ios.template_release.arm64.simulator.a'))
     if len(libraries) != 1: raise RuntimeError('Expected exactly one experimental Godot simulator library: ' + str(libraries))
@@ -44,6 +48,10 @@ def build(engine, output):
         'MinimumOSVersion':'15.0','UIDeviceFamily':[1],'UILaunchScreen':{}}))
     for library in app.glob('*.dylib'): run(['codesign','--force','--sign','-',library])
     run(['codesign','--force','--sign','-',app])
+    try: prewarm.wait(timeout=180)
+    except subprocess.TimeoutExpired:
+        prewarm.terminate(); prewarm.wait(timeout=30)
+        print('Simulator prewarming timed out; execution will retry with a bounded query.',flush=True)
 
 def execute(output):
     fixture = ROOT / 'runtime_dotnet/game-proof'
@@ -56,17 +64,19 @@ def execute(output):
     run(['swiftc','-swift-version','5',ROOT / 'ios/PCKInspector.swift',ROOT / 'tests/dotnet/main.swift','-o',inspector])
     run([inspector,pack])
     runtimes=json.loads(capture(['xcrun','simctl','list','runtimes','--json'],text=True))['runtimes']
-    runtime=sorted([r for r in runtimes if r.get('isAvailable') and '.iOS-' in r['identifier']],key=lambda r:tuple(map(int,r['version'].split('.'))))[-1]['identifier']
+    # The engine targets iOS 15. Prefer the oldest installed supported runtime
+    # for the headless ABI test; newer simulator images have heavier migrations.
+    runtime=sorted([r for r in runtimes if r.get('isAvailable') and '.iOS-' in r['identifier'] and int(r['version'].split('.')[0]) >= 15],key=lambda r:tuple(map(int,r['version'].split('.'))))[0]['identifier']
     devices=json.loads(capture(['xcrun','simctl','list','devices','available','--json'],text=True))['devices'][runtime]
     phone=next(d for d in devices if d['name'].startswith('iPhone') and d.get('deviceTypeIdentifier'))
     device=capture(['xcrun','simctl','create','HollowGodotCSharp',phone['deviceTypeIdentifier'],runtime],text=True).strip()
     container=None
     try:
-        run(['xcrun','simctl','boot',device]);run(['xcrun','simctl','bootstatus',device,'-b'],timeout=600)
-        run(['xcrun','simctl','install',device,app])
+        run(['xcrun','simctl','boot',device]);run(['xcrun','simctl','bootstatus',device,'-b'],timeout=300)
+        run(['xcrun','simctl','install',device,app],timeout=180)
         container=Path(capture(['xcrun','simctl','get_app_container',device,'org.godotplayer.dotnetgameproof','data'],text=True).strip())
         documents=container / 'Documents'; documents.mkdir(exist_ok=True);shutil.copyfile(pack,documents / 'game.pck')
-        run(['xcrun','simctl','launch','--stdout=' + str(output / 'stdout.log'),'--stderr=' + str(output / 'stderr.log'),device,'org.godotplayer.dotnetgameproof'])
+        run(['xcrun','simctl','launch','--stdout=' + str(output / 'stdout.log'),'--stderr=' + str(output / 'stderr.log'),device,'org.godotplayer.dotnetgameproof'],timeout=180)
         complete=documents / 'native-result.json';deadline=time.monotonic()+120
         while not complete.is_file() and time.monotonic()<deadline:time.sleep(0.25)
         if not complete.is_file():raise RuntimeError('Godot C# game did not complete; see native logs')

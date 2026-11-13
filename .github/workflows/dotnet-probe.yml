@@ -98,7 +98,7 @@ jobs:
           mkdir -p build/godot-dotnet-proof
           .cache/dotnet-proof-env/bin/python tools/prove_godot_dotnet_ios.py .cache/godot-source build/godot-dotnet-proof --phase build 2>&1 | tee build/godot-dotnet-proof/build.log
       - name: Execute the independent C# game on iOS Simulator
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: |
           set -o pipefail
           .cache/dotnet-proof-env/bin/python tools/prove_godot_dotnet_ios.py .cache/godot-source build/godot-dotnet-proof --phase run 2>&1 | tee build/godot-dotnet-proof/execution.log
