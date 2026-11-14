@@ -1,0 +1,192 @@
+// Trusted Mono host experiment. Imported Windows native libraries are never staged.
+#include "core/config/project_settings.h"
+#include "core/io/dir_access.h"
+#include "core/io/file_access.h"
+#include "core/os/os.h"
+#include "core/string/print_string.h"
+#include "core/templates/hash_set.h"
+#include "modules/mono/utils/path_utils.h"
+#include <mono/jit/jit.h>
+#include <cstdio>
+
+extern "C" int coreclr_initialize(const char *, const char *, int, const char **, const char **, void **, unsigned int *);
+extern "C" void *mono_aot_module_System_Private_CoreLib_info;
+extern "C" void *mono_aot_module_GodotSharp_info;
+
+static uint32_t pe_u32(const Vector<uint8_t> &bytes, int offset) {
+	return uint32_t(bytes[offset]) | uint32_t(bytes[offset + 1]) << 8 | uint32_t(bytes[offset + 2]) << 16 | uint32_t(bytes[offset + 3]) << 24;
+}
+static uint16_t pe_u16(const Vector<uint8_t> &bytes, int offset) {
+	return uint16_t(bytes[offset]) | uint16_t(bytes[offset + 1]) << 8;
+}
+static bool portable_il(const Vector<uint8_t> &bytes) {
+	// Accept IL-only PE images. Never load Windows machine code or ReadyToRun.
+	if (bytes.size() < 128 || bytes[0] != 'M' || bytes[1] != 'Z') return false;
+	uint32_t pe = pe_u32(bytes, 60);
+	if (pe > uint32_t(bytes.size() - 24) || pe_u32(bytes, pe) != 0x4550) return false;
+	uint32_t opt = pe + 24, opt_size = pe_u16(bytes, pe + 20), sections = pe_u16(bytes, pe + 6);
+	if (opt_size < 2 || opt_size > bytes.size() - opt || sections > 96) return false;
+	uint32_t directories = pe_u16(bytes, opt) == 0x20b ? 112 : pe_u16(bytes, opt) == 0x10b ? 96 : 0;
+	if (!directories || opt_size < directories + 15 * 8 || pe_u32(bytes, opt + directories - 4) < 15) return false;
+	uint32_t cli_rva = pe_u32(bytes, opt + directories + 14 * 8);
+	uint32_t table = opt + opt_size;
+	if (table > uint32_t(bytes.size()) || sections > (bytes.size() - table) / 40) return false;
+	for (uint32_t i = 0; i < sections; i++) {
+		uint32_t section = table + i * 40, va = pe_u32(bytes, section + 12), raw = pe_u32(bytes, section + 20), size = pe_u32(bytes, section + 16);
+		if (cli_rva < va || cli_rva - va >= size) continue;
+		uint64_t offset = uint64_t(raw) + cli_rva - va;
+		if (offset + 72 > uint64_t(bytes.size()) || size - (cli_rva - va) < 72) return false;
+		uint32_t flags = pe_u32(bytes, offset + 16);
+		return (flags & 1) != 0 && (flags & 2) == 0 && pe_u32(bytes, offset + 64) == 0 && pe_u32(bytes, offset + 68) == 0;
+	}
+	return false;
+}
+
+static bool windows_runtime_component(const String &name) {
+	// Standard self-contained .NET exports carry the Windows CLR, GC, JIT,
+	// host and debugging binaries. The trusted iOS Mono runtime replaces them.
+	const char *components[] = { "clretwrc.dll", "clrgc.dll", "clrjit.dll", "coreclr.dll", "hostfxr.dll", "hostpolicy.dll", "mscordaccore.dll", "mscordbi.dll", "mscorrc.dll", "msquic.dll", "system.globalization.native.dll", "system.io.compression.native.dll", "system.native.dll", "system.net.security.native.dll", "system.security.cryptography.native.apple.dll", "system.security.cryptography.native.openssl.dll" };
+	for (const char *component : components) { if (name == component) return true; }
+	return (name.begins_with("mscordaccore_") || name.begins_with("microsoft.diasymreader.native.")) && name.ends_with(".dll");
+}
+
+int hollow_dotnet_initialize(const char *, const char *, int, const char **, const char **, void **handle, unsigned int *domain) {
+	const String assembly = Path::get_csharp_project_name();
+	ERR_FAIL_COND_V_MSG(assembly.is_empty() || assembly.get_file() != assembly || assembly.contains(":"), -1, "Invalid managed game assembly name.");
+	const String bundled = OS::get_singleton()->get_bundle_resource_dir();
+	const String managed = bundled.path_join("Managed");
+	Ref<DirAccess> platform = DirAccess::open(managed);
+	ERR_FAIL_COND_V_MSG(platform.is_null(), -1, "The trusted managed runtime was not bundled.");
+	String tpa;
+	HashSet<String> trusted_names;
+	platform->list_dir_begin();
+	for (String name = platform->get_next(); !name.is_empty(); name = platform->get_next()) {
+		if (!platform->current_is_dir() && name.get_extension().to_lower() == "dll") {
+			if (!tpa.is_empty()) tpa += ":";
+			tpa += managed.path_join(name);
+			trusted_names.insert(name.to_lower());
+		}
+	}
+	platform->list_dir_end();
+	String source;
+	Ref<DirAccess> publish = DirAccess::open("res://.godot/mono/publish");
+	ERR_FAIL_COND_V_MSG(publish.is_null(), -1, "Managed publish directory is missing.");
+	publish->list_dir_begin();
+	for (String name = publish->get_next(); !name.is_empty(); name = publish->get_next()) {
+		if (publish->current_is_dir() && FileAccess::exists("res://.godot/mono/publish/" + name + "/" + assembly + ".dll")) {
+			source = "res://.godot/mono/publish/" + name; break;
+		}
+	}
+	publish->list_dir_end();
+	ERR_FAIL_COND_V_MSG(source.is_empty(), -1, "Main managed assembly is missing from this pack.");
+	// Extracted IL is disposable runtime data, not a game save. Keep it out of
+	// save backups and separate it for each launcher's per-game user directory.
+	const String cache = OS::get_singleton()->get_cache_path().path_join("HollowManaged").path_join(OS::get_singleton()->get_user_data_dir().sha256_text());
+	ERR_FAIL_COND_V(DirAccess::make_dir_recursive_absolute(cache) != OK, -1);
+	Ref<DirAccess> previous = DirAccess::open(cache);
+	ERR_FAIL_COND_V(previous.is_null(), -1);
+	previous->list_dir_begin();
+	for (String name = previous->get_next(); !name.is_empty(); name = previous->get_next()) {
+		if (!previous->current_is_dir() && name.get_extension().to_lower() == "dll") {
+			ERR_FAIL_COND_V(previous->remove(name) != OK, -1);
+		}
+	}
+	previous->list_dir_end();
+	Ref<DirAccess> files = DirAccess::open(source);
+	ERR_FAIL_COND_V(files.is_null(), -1);
+	files->list_dir_begin(); int count = 0; uint64_t total = 0;
+	for (String name = files->get_next(); !name.is_empty(); name = files->get_next()) {
+		if (files->current_is_dir() || name.get_extension().to_lower() != "dll") continue;
+		if (name != assembly + ".dll" && (trusted_names.has(name.to_lower()) || windows_runtime_component(name.to_lower()))) continue;
+		Ref<FileAccess> input = FileAccess::open(source.path_join(name), FileAccess::READ);
+		ERR_FAIL_COND_V(input.is_null() || input->get_length() > 32 * 1024 * 1024, -1);
+		const uint64_t length = input->get_length();
+		Vector<uint8_t> bytes = input->get_buffer(length);
+		ERR_FAIL_COND_V_MSG(uint64_t(bytes.size()) != length, -1, "Could not read the complete managed game dependency: " + name);
+		ERR_FAIL_COND_V_MSG(!portable_il(bytes), -1, "Unsupported native, mixed-mode or ReadyToRun game dependency: " + name);
+		total += bytes.size();
+		ERR_FAIL_COND_V(++count > 128 || total > 128 * 1024 * 1024, -1);
+		Ref<FileAccess> target = FileAccess::open(cache.path_join(name), FileAccess::WRITE);
+		ERR_FAIL_COND_V(target.is_null(), -1);
+		ERR_FAIL_COND_V_MSG(!target->store_buffer(bytes), -1, "Could not cache the managed game dependency: " + name);
+		target->flush();
+		ERR_FAIL_COND_V(target->get_error() != OK, -1);
+		target->close();
+	}
+	files->list_dir_end();
+	CharString trusted = tpa.utf8(), paths = (cache + ":" + managed).utf8(), base = managed.utf8(), native = (bundled + ":" + bundled.path_join("Frameworks")).utf8();
+	const char *keys[] = { "TRUSTED_PLATFORM_ASSEMBLIES", "APP_PATHS", "APP_CONTEXT_BASE_DIRECTORY", "NATIVE_DLL_SEARCH_DIRECTORIES" };
+	const char *values[] = { trusted.get_data(), paths.get_data(), base.get_data(), native.get_data() };
+	mono_aot_register_module(reinterpret_cast<void **>(mono_aot_module_System_Private_CoreLib_info));
+	mono_aot_register_module(reinterpret_cast<void **>(mono_aot_module_GodotSharp_info));
+	mono_jit_set_aot_mode(MONO_AOT_MODE_INTERP);
+	print_line("HOLLOW_DOTNET: Starting signed Mono interpreter with independent managed game assemblies.");
+	return coreclr_initialize("Hollow", "Hollow", 4, keys, values, handle, domain);
+}
+
+#ifdef HOLLOW_DOTNET_PROOF
+#include "player_cursor_image.h"
+#include "main/main.h"
+#include "core/os/main_loop.h"
+extern int apple_embedded_main(int, char **);
+extern void apple_embedded_finish();
+// The ordinary Xcode exporter generates these callbacks. This isolated proof
+// includes no export plugins and supplies the same empty callbacks itself.
+void godot_apple_embedded_plugins_initialize() {}
+void godot_apple_embedded_plugins_deinitialize() {}
+extern "C" int HollowPrepareGodotGraphics(const char *executable, const char *pack, const char *log) {
+	setvbuf(stdout, nullptr, _IONBF, 0); setvbuf(stderr, nullptr, _IONBF, 0);
+	char *argv[] = { const_cast<char *>(executable), const_cast<char *>("--main-pack"), const_cast<char *>(pack),
+		const_cast<char *>("--log-file"), const_cast<char *>(log), const_cast<char *>("--rendering-method"),
+		const_cast<char *>("gl_compatibility"), const_cast<char *>("--rendering-driver"), const_cast<char *>("opengl3"), nullptr };
+	int result = apple_embedded_main(9, argv);
+	Logger::set_flush_stdout_on_print(true);
+	return result;
+}
+extern "C" const char *HollowGodotProofSavePath() {
+	static CharString path;
+	path = OS::get_singleton()->get_user_data_dir().path_join("dotnet-proof.json").utf8();
+	return path.get_data();
+}
+extern "C" int HollowRunGodotProof(const char *executable, const char *pack, const char *log) {
+	setvbuf(stdout, nullptr, _IONBF, 0); setvbuf(stderr, nullptr, _IONBF, 0);
+	// Upstream's change_to_launch_dir expects argv[0] to be an absolute path,
+	// just as the working launcher supplies it.
+	char *argv[] = { const_cast<char *>(executable), const_cast<char *>("--headless"), const_cast<char *>("--main-pack"), const_cast<char *>(pack), const_cast<char *>("--log-file"), const_cast<char *>(log), nullptr };
+	int result = apple_embedded_main(6, argv);
+	fprintf(stderr, "HOLLOW_GODOT_SETUP: %d\n", result);
+	if (result != 0) return 100 + result;
+	Error phase2 = Main::setup2(false);
+	fprintf(stderr, "HOLLOW_GODOT_SETUP2: %d\n", int(phase2));
+	if (phase2 != OK) return 200 + int(phase2);
+	// CPU cursor decoding must work before any rendered frame or GPU readback.
+	{
+		Ref<CompressedTexture2D> cursor;
+		cursor.instantiate();
+		if (cursor->load("res://ProofCursor.ctex") != OK) return 410;
+		Ref<Image> image = player_read_imported_cursor(cursor);
+		if (image.is_null() || image->is_compressed() || image->get_width() != 4 || image->get_height() != 4 || image->get_pixel(0, 0) != Color(0, 1, 0, 1)) return 411;
+		fprintf(stderr, "HOLLOW_CPU_CURSOR_PASS: VRAM-compressed cursor decoded before first frame\n");
+	}
+	fprintf(stderr, "HOLLOW_GODOT_USER_DIR: %s\n", OS::get_singleton()->get_user_data_dir().utf8().get_data());
+	result = Main::start();
+	fprintf(stderr, "HOLLOW_GODOT_START: %d\n", result);
+	if (result != 0) return 300 + result;
+	MainLoop *loop = OS::get_singleton()->get_main_loop();
+	if (!loop) return 400;
+	// Match OS_AppleEmbedded::start(): starting the project creates the scene
+	// tree, and initializing that tree invokes _Ready and enables processing.
+	loop->initialize();
+	fprintf(stderr, "HOLLOW_GODOT_LOOP_INITIALIZED\n");
+	for (int frame = 0; frame < 300; frame++) {
+		if (Main::iteration()) {
+			fprintf(stderr, "HOLLOW_GODOT_FINISHED: %d frames\n", frame);
+			apple_embedded_finish();
+			return 0;
+		}
+	}
+	fprintf(stderr, "HOLLOW_GODOT_FRAME_LIMIT\n");
+	apple_embedded_finish();
+	return 2;
+}
+#endif

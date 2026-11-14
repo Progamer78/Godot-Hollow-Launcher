@@ -34,10 +34,17 @@ public:
             player_cursor_images.erase(int(p_shape));
             player_cursor_hotspots.erase(int(p_shape));
         } else {
-            Ref<Image> image = _get_cursor_image_from_resource(p_cursor, p_hotspot);
-            if (image.is_null()) return;
-            player_cursor_images[int(p_shape)] = image;
-            player_cursor_hotspots[int(p_shape)] = p_hotspot;
+            Ref<CompressedTexture2D> imported = p_cursor;
+            Ref<Image> image = imported.is_valid() ? player_read_imported_cursor(imported) : _get_cursor_image_from_resource(p_cursor, p_hotspot);
+            if (image.is_null() || image->is_empty() || p_hotspot.x < 0 || p_hotspot.y < 0 || p_hotspot.x >= image->get_width() || p_hotspot.y >= image->get_height()) {
+                // A failed cursor decode should show the native arrow, never
+                // keep a corrupt or stale image from an earlier cursor.
+                player_cursor_images.erase(int(p_shape));
+                player_cursor_hotspots.erase(int(p_shape));
+            } else {
+                player_cursor_images[int(p_shape)] = image;
+                player_cursor_hotspots[int(p_shape)] = p_hotspot;
+            }
         }
         ++player_cursor_revision;
     }

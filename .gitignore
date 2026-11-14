@@ -4,6 +4,8 @@ artifacts/
 **/.godot/
 **/.import/
 **/__pycache__/
+**/bin/
+**/obj/
 GodotPlayerReference/
 FullGameReference/
 Goodbye_Eternity-*/

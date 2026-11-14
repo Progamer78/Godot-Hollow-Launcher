@@ -33,6 +33,11 @@ if __name__=='__main__':
     spec=importlib.util.spec_from_file_location('exe_fixture',Path(__file__).resolve().parents[1]/'tests/test_executable.py')
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     (output/'original-fixture.exe').write_bytes(module.fixture())
+    original4=module.fixture()
+    original4[0x600:0x640]=bytes(64)
+    anchor=b'PackedSourcePCK::try_open_pack\0'
+    original4[0x600:0x600+len(anchor)]=anchor
+    (output/'original4-fixture.exe').write_bytes(original4)
     encrypted=base64.b64decode('R0RFQwEAAAARnnc/7CJArt7Q9wRTTsAaDAAAAAAAAACQ/7fMiwOnJmMloYFnmBpl')
     payloads=[('res://project.godot',b'config_version=4\n'),('res://proof.gde',encrypted)]
     header=b'GDPC'+struct.pack('<IIII',1,3,6,3)+bytes(64)

@@ -1,0 +1,30 @@
+# Search, scene inspection and pins — 0.5.2
+
+Search replaces the overlapping Stats and Find tabs. Name/path, type and value/change filters work together; an empty name and Any type include every supported scalar. Boolean and short text values work alongside numbers.
+
+1. Choose optional filters, then Search. Start with Any value when the current value is unknown.
+2. Close tools and perform an action in the game. Reopen tools: your criteria, candidate set, page and baseline are retained.
+3. Choose Changed, Unchanged, Increased or Decreased, optionally add a name/type filter, then Narrow Results. Increased/Decreased match numbers.
+4. Repeat to narrow further. Undo Last Narrow restores the previous candidate set and baseline. New Search replaces them after confirmation.
+
+Each completed search/narrow records its baseline. Reading results, editing a value, refreshing, changing pages, switching tabs and inspecting the scene do not advance that baseline. Automatic refresh only updates displayed current values. Paused games usually have no new changes. Search state lasts for this running game, not after quitting the process; pins and monitor choices persist across launches.
+
+Narrow Results only checks the current candidate pool. The scope label describes where that pool was discovered; it does not rescan excluded variables. Search Whole Game Again explicitly replaces it. Switching to a type absent from the current pool, changing scope, or searching after zero matches offers a fresh search automatically. Type availability comes from the entire index, including other pages. Boolean Equals False matches actual Godot booleans; games storing flags as numeric 0/1 require Number Equals 0/1. Clear the optional name filter to include all supported live script variables.
+
+Results use 100-row pages over the complete retained candidate set. Discovery and narrowing run in batches of at most 512 tasks or approximately 8 ms, with large arrays and dictionaries expanded in groups of at most 64 entries. Script getters/property-list calls remain synchronous. All retained candidates participate in narrowing, including other pages. Search has memory protection budgets: 250,000 candidates, 50,000 pending tasks, 1,000,000 inspected tasks and paths up to eight steps. Reaching a budget/depth reports an incomplete scan; it never silently presents that as the whole game. Up to eight previous narrows are retained within a 250,000-record history budget. Unsupported/native/static values are outside this script-property search.
+
+Scene reports the actual current scene, node/script paths, visibility, processing/input flags and connected signal target methods. Select a node to scope a new Search to its subtree. Exported script source is readable only when the game includes it, with a 32 KB display limit. These are live connections and properties, not a trace of every executed condition or a full Godot debugger.
+
+Scene's separate Capture Snapshot / Compare Changes can reveal booleans, text or numbers changed after an action. It does not modify Search. That snapshot uses the existing bounded scanner (up to 2,000 values, 600 nodes, 12,000 examined values; nested containers have their own depth/entry budgets). The changed count includes every captured changed value, with the first 200 displayed and incomplete snapshots labelled.
+
+Pins has Edit/drag reordering and a hold-to-open Move to Top action. Order saves per game and also orders the monitor. Each pin has a Show in Monitor switch; up to five may be selected. Selecting one enables the overall monitor. The overall switch can hide the monitor without clearing selections. The monitor reads current values; Apply and Freeze still use each pin's separately saved edit value.
+
+Validation: both locally compiled Windows runtimes passed 170 native tools checks each, including persistent JSON sessions, read-only refresh, combined boolean/text/name filters, undo, real scene/signal inspection, 200,000-entry arrays and dictionaries, a whole-game search finding 200,003 false booleans without a name filter, cancellation and offscreen-candidate narrowing. Apple compilation/package and physical-device verification are recorded separately in the update's results file.
+
+In 0.5.2, search work yields briefly to UIKit between batches instead of waiting for the 200 ms input heartbeat. Progress updates are throttled to 10 Hz; other batches return metadata without rereading/serializing the result page. Matching names are prioritized and discovery previews can be edited while the remainder scans. Preview reads do not commit a new comparison baseline; Cancel restores the previous completed search.
+
+The candidate index shares each container's path and label, retaining only its key/index and typed baseline per scalar. It formats complete rows only for the visible page. Container access is cached within one batch and refreshed after each yield, including when the game replaces an array. This supports 200,000-entry arrays/dictionaries without the previous 50,000-candidate cutoff. Flat candidate/location records for the numeric fixture occupy about 11.2 MB; that is not total application/index memory and excludes referenced strings, container storage, history and engine allocations.
+
+Pins offers a visible Rename button and name-only editor. New default names use the variable leaf; existing pins whose name equals their entire path also display a short leaf. The HUD places the name and value on separate lines so a long name cannot consume the value. The simulator regression renders the actual HUD with a very long name and compares two different values; identical/truncated-value images fail the test. Captures are attached to Actions artifacts.
+
+The Apple build patch also tracks shared Swift sources and local bridging headers as dependencies of every Swift object. Shared model changes rebuild their consumers instead of reusing incompatible cached objects. Engine C++ compiler caching remains enabled.

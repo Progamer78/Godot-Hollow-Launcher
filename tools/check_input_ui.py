@@ -5,7 +5,9 @@ from pathlib import Path
 import platform
 import plistlib
 import re
+import shutil
 import subprocess
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,6 +39,20 @@ def cleanup_device(device):
             print(f"Simulator cleanup {action} could not finish: {error}")
 
 
+def wait_for_result(source, output, timeout=120):
+    deadline = time.monotonic() + timeout
+    while not source.is_file() and time.monotonic() < deadline:
+        time.sleep(0.25)
+    if not source.is_file():
+        (output / "run.log").write_text("Input app did not produce a completion record before the timeout. See launcher.log and diagnostics.log.\n")
+        raise RuntimeError("Input app did not finish; no completion record. See input-ui diagnostics.")
+    log = source.read_text(encoding="utf-8")
+    (output / "run.log").write_text(log, encoding="utf-8")
+    print(log)
+    if "PLAYER_INPUT_UI_PASS:" not in log or "PLAYER_INPUT_UI_FAIL:" in log:
+        raise RuntimeError("Input UIKit smoke test failed; see input-ui/run.log.")
+
+
 def run(output):
     audit_callbacks()
     output.mkdir(parents=True, exist_ok=True)
@@ -52,7 +68,7 @@ def run(output):
         "CFBundleSupportedPlatforms": ["iPhoneSimulator"],
         "UILaunchScreen": {}, "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
     }))
-    files = ["ios/ControllerProfile.swift", "ios/ControllerInput.swift", "ios/ControlProfile.swift", "ios/GameInput.swift", "ios/InputViews.swift", "ios/KeyboardInput.swift", "ios/Joystick.swift", "tests/input-ui/LifetimeAudit.swift", "tests/input-ui/main.swift"]
+    files = ["ios/ToolModels.swift", "ios/PinnedHUD.swift", "ios/ControllerProfile.swift", "ios/ControllerInput.swift", "ios/ControlProfile.swift", "ios/GameInput.swift", "ios/InputViews.swift", "ios/KeyboardInput.swift", "ios/Joystick.swift", "tests/input-ui/LifetimeAudit.swift", "tests/input-ui/main.swift"]
     subprocess.run(["xcrun", "--sdk", "iphonesimulator", "swiftc", "-swift-version", "5", "-parse-as-library",
                     "-sdk", sdk, "-target", f"{arch}-apple-ios15.0-simulator",
                     *[str(ROOT / file) for file in files], "-o", str(app / "InputSmoke")], check=True, timeout=120)
@@ -70,15 +86,38 @@ def run(output):
     try:
         subprocess.run(["xcrun", "simctl", "boot", device], check=True, timeout=30)
         subprocess.run(["xcrun", "simctl", "bootstatus", device, "-b"], check=True, timeout=180)
-        subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True, timeout=60)
-        result = subprocess.run(["xcrun", "simctl", "launch", "--console", device, bundle], capture_output=True, text=True, timeout=60)
-        log = result.stdout + result.stderr
-        (output / "run.log").write_text(log)
-        print(log)
-        if result.returncode or "PLAYER_INPUT_UI_PASS" not in log or "PLAYER_INPUT_UI_FAIL" in log:
-            raise RuntimeError("Input UIKit smoke test failed; see input-ui/run.log.")
+        # Fresh hosted simulators can spend over a minute starting installd and
+        # FrontBoard even after bootstatus finishes. These are maximum limits;
+        # healthy runners proceed as soon as each command returns.
+        subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True, timeout=180)
+        container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container", device, bundle, "data"], text=True, timeout=60).strip())
+        # Console attachment can outlive a short-lived UIKit process on a busy
+        # freshly booted runner. Require an atomic completion record from the
+        # actual test app, without keeping its console connection open.
+        try:
+            result = subprocess.run(["xcrun", "simctl", "launch", device, bundle], capture_output=True, text=True, timeout=180)
+        except subprocess.TimeoutExpired as error:
+            partial = (error.stdout or b"") + (error.stderr or b"")
+            if isinstance(partial, bytes): partial = partial.decode(errors="replace")
+            (output / "launcher.log").write_text(partial)
+            raise
+        (output / "launcher.log").write_text(result.stdout + result.stderr)
+        result.check_returncode()
+        try:
+            wait_for_result(container / "Documents/input-ui-result.log", output)
+        finally:
+            for name in ["hud-long-name-first.png", "hud-long-name-second.png"]:
+                screenshot = container / "Documents" / name
+                if screenshot.is_file(): shutil.copyfile(screenshot, output / name)
         (output / "results.json").write_text(json.dumps({"passed": True, "runtime": runtime, "sources": files,
-              "scope": "Actual UIKit controls/keyboard/cursor updates; recorded engine endpoints, no Godot runtime or display-frame timing guarantee"}, indent=2) + "\n")
+              "scope": "Actual UIKit controls/keyboard/cursor updates and rendered SwiftUI long-name pin HUD regression; recorded engine endpoints, no Godot runtime or display-frame timing guarantee"}, indent=2) + "\n")
+    except Exception:
+        try:
+            diagnostic = subprocess.run(["xcrun", "simctl", "spawn", device, "log", "show", "--last", "3m", "--style", "compact", "--predicate", "process == 'InputSmoke'"], capture_output=True, text=True, timeout=20)
+            (output / "diagnostics.log").write_text(diagnostic.stdout + diagnostic.stderr)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        raise
     finally:
         cleanup_device(device)
 

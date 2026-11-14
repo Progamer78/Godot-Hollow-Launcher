@@ -8,6 +8,18 @@ on:
         type: choice
         default: '4.2'
         options: ['4.2', '4.1', '4.3', 'none']
+      use_build_cache:
+        description: 'Reuse engine compiler outputs (disable for a clean diagnostic build)'
+        type: boolean
+        default: true
+      dotnet_probe:
+        description: 'Run the isolated C# interpreter experiment instead of building an IPA'
+        type: boolean
+        default: false
+      dotnet_game_probe:
+        description: 'Run the experimental real Godot C# scene on iOS Simulator instead of building an IPA'
+        type: boolean
+        default: false
   push:
     branches: [main, master]
 
@@ -16,12 +28,34 @@ permissions:
 
 jobs:
   export-and-build:
+    if: github.event_name != 'workflow_dispatch' || (!inputs.dotnet_probe && !inputs.dotnet_game_probe)
     runs-on: macos-latest
     timeout-minutes: 180
     env:
       SPINE_RUNTIME: ${{ inputs.spine_runtime || '4.2' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Identify Apple compiler and SDK
+        id: toolchain
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, subprocess
+          commands = [['xcodebuild', '-version'], ['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], ['xcrun', 'clang', '--version']]
+          version = '\n'.join(subprocess.check_output(command, text=True) for command in commands)
+          fingerprint = hashlib.sha256(version.encode()).hexdigest()[:16]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('fingerprint=' + fingerprint + '\n')
+          print('Compiler cache toolchain:', fingerprint)
+          PY
+      - name: Restore engine compiler cache
+        id: engine_cache
+        if: github.event_name != 'workflow_dispatch' || inputs.use_build_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/hollow-engine-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-hollow-scons-v1-${{ steps.toolchain.outputs.fingerprint }}-${{ env.SPINE_RUNTIME }}-${{ hashFiles('ios/**', 'runtime3/**', 'runtime_shared/**', 'runtime_dotnet/host/**', 'tools/patch*.py', 'tools/prepare*.py', 'tools/stage_dotnet_runtime.py', '.github/workflows/ios-player.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-hollow-scons-v1-${{ steps.toolchain.outputs.fingerprint }}-${{ env.SPINE_RUNTIME }}-
       - name: Setup matching official Godot and export templates
         uses: chickensoft-games/setup-godot@v2
         with:
@@ -99,16 +133,34 @@ jobs:
           build/objc-lifetime-tests
           python3 tools/build_archive_support.py .cache/godot-source build/archive-tests
           python3 tools/package_fixtures.py
-          swiftc -swift-version 5 -import-objc-header ios/ArchiveSupport.h ios/PCKInspector.swift ios/ControllerProfile.swift ios/ControlProfile.swift ios/ToolModels.swift ios/PackageImport.swift ios/ExecutableImport.swift ios/SaveVault.swift ios/GameLibrary.swift tests/models/main.swift -L build/archive-tests -lplayer_archive -Xlinker -lc++ -lz -o build/model-tests
+          godot --headless --path bootstrap --script ../tests/encrypted4.gd -- "$PWD/build/archive-tests"
+          swiftc -swift-version 5 -import-objc-header ios/ArchiveSupport.h ios/PCKInspector.swift ios/ControllerProfile.swift ios/ControlProfile.swift ios/LibraryQuery.swift ios/ToolModels.swift ios/GameToolsState.swift ios/PackageImport.swift ios/ExecutableImport.swift ios/SaveVault.swift ios/GameLibrary.swift tests/models/main.swift -L build/archive-tests -lplayer_archive -Xlinker -lc++ -lz -o build/model-tests
           build/model-tests
           godot --headless --main-pack build/archive-tests/imported-apk.pck -- --player-proof 2>&1 | tee build/apk-proof.log
           python3 -c "from pathlib import Path; text=Path('build/apk-proof.log').read_text(); assert 'PLAYER_PROOF movement PASS' in text and not any(message in text for message in ['SCRIPT ERROR', 'Failed to load', 'Error opening', 'Couldn\x27t load project']), text"
           python3 -m unittest discover -s tests -v
       - name: Stage legacy script compatibility and built-in AI runtime
         run: python3 tools/prepare_compatibility.py .cache/godot-source .cache/limboai
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Stage the trusted iOS C# interpreter and matching Godot API
+        # Build-time adaptation only; imported game assemblies are unchanged.
+        run: |
+          dotnet run --project tests/dotnet-metadata/Hollow.Metadata.Tests.csproj --configuration Release
+          python3 tools/stage_dotnet_runtime.py build/dotnet-runtime --rid ios-arm64
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          stage = json.loads(Path('build/dotnet-runtime/stage.json').read_text(encoding='utf-8'))
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
+              out.write('HOLLOW_MONO_NATIVE=' + stage['native'] + '\n')
+          PY
       - name: Patch and verify player integration
         run: |
+          python3 tools/check_ios_graphics.py .cache/godot-source build/ios-graphics
           python3 tools/patch_engine.py .cache/godot-source
+          python3 tools/patch_dotnet.py .cache/godot-source
           python3 - <<'PY'
           from pathlib import Path
           renderer = Path('.cache/godot-source/drivers/apple_embedded/godot_view_renderer.mm')
@@ -122,7 +174,7 @@ jobs:
           xcrun --sdk iphoneos swiftc -typecheck -parse-as-library \
             -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
             -swift-version 5 -cxx-interoperability-mode=default \
-            -module-name godot_swift_module -target arm64-apple-ios14.0 \
+            -module-name godot_swift_module -target arm64-apple-ios15.0 \
             -I .cache/godot-source \
             -import-objc-header .cache/godot-source/drivers/apple_embedded/bridging_header_apple_embedded.h \
             .cache/godot-source/drivers/apple_embedded/*.swift \
@@ -137,12 +189,16 @@ jobs:
           set -o pipefail
           python3 tools/check_input_ui.py build/input-ui 2>&1 | tee build/input-ui.log
       - name: Compile isolated Godot 3 framework
+        id: engine3_build
         run: |
           set -o pipefail
           python3 tools/patch_godot3.py .cache/godot3-source
           python3 -m venv .cache/scons3-env
           .cache/scons3-env/bin/pip install scons==4.10.1
+          mkdir -p "$GITHUB_WORKSPACE/.cache/hollow-engine-cache"
           cd .cache/godot3-source
+          export SCONS_CACHE="$GITHUB_WORKSPACE/.cache/hollow-engine-cache/godot3"
+          export SCONS_CACHE_LIMIT=3072
           runtime3_flags=(platform=iphone target=release tools=no arch=arm64
             module_arkit_enabled=no module_camera_enabled=no module_gdnative_enabled=no
             lto=none optimize=size "CCFLAGS=-fvisibility=hidden -fvisibility-inlines-hidden"
@@ -154,12 +210,16 @@ jobs:
           python3 tools/build_godot3_framework.py .cache/godot3-source build/runtime3 \
             2>&1 | tee build/godot3-link.log
       - name: Compile ARM64 runtime with external main-pack support
+        id: engine4_build
         run: |
           set -o pipefail
           python3 -m venv .cache/scons-env
           .cache/scons-env/bin/pip install scons==4.10.1
+          mkdir -p "$GITHUB_WORKSPACE/.cache/hollow-engine-cache"
           cd .cache/godot-source
           runtime_flags=(platform=ios target=template_release arch=arm64
+            module_mono_enabled=yes
+            "cache_path=$GITHUB_WORKSPACE/.cache/hollow-engine-cache/godot4" cache_limit=3
             disable_path_overrides=no vulkan=no metal=yes opengl3=yes
             debug_symbols=no optimize=size -j"$(sysctl -n hw.logicalcpu)")
           ../scons-env/bin/scons "${runtime_flags[@]}" \
@@ -173,19 +233,27 @@ jobs:
               2>&1 | tee ../../build/spine-compile.log
           fi
           ../scons-env/bin/scons "${runtime_flags[@]}" 2>&1 | tee ../../build/runtime-build.log
+      - name: Save engine compiler cache
+        if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.use_build_cache) && steps.engine_cache.outputs.cache-hit != 'true' && (steps.engine3_build.outcome == 'success' || steps.engine4_build.outcome == 'success') }}
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/hollow-engine-cache
+          key: ${{ steps.engine_cache.outputs.cache-primary-key }}
       - name: Install player runtime into exported Xcode project
         run: |
           spine_notice=()
           if [ "$SPINE_RUNTIME" != 'none' ]; then
             spine_notice=(--spine-license build/SPINE-RUNTIMES-LICENSE.txt)
           fi
-          python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a "${spine_notice[@]}" --compatibility-license build/COMPATIBILITY-LICENSES.txt
+          python3 tools/prepare_xcode.py build/ios .cache/godot-source/bin/libgodot.ios.template_release.arm64.a "${spine_notice[@]}" --compatibility-license build/COMPATIBILITY-LICENSES.txt --spine-version "$SPINE_RUNTIME"
+          python3 tools/install_dotnet_runtime.py prepare build/ios build/dotnet-runtime/stage.json
       - name: Build Xcode archive (unsigned)
         run: |
           set -o pipefail
           xcodebuild archive \
             -project build/ios/player.xcodeproj \
             -scheme player -sdk iphoneos -configuration Release \
+            -xcconfig build/ios/dotnet-link.xcconfig \
             -archivePath build/ios/player.xcarchive \
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_STYLE=Manual DEVELOPMENT_TEAM="" \
@@ -196,6 +264,7 @@ jobs:
           mkdir -p build/package/Payload
           cp -R build/ios/player.xcarchive/Products/Applications/*.app build/package/Payload/
           python3 tools/install_godot3_framework.py build/package/Payload build/runtime3/Godot3Runtime.framework
+          python3 tools/install_dotnet_runtime.py install build/package/Payload build/dotnet-runtime/stage.json
           cd build/package
           zip -qr ../GodotPlayer-unsigned.ipa Payload
           cd ../..
@@ -209,8 +278,10 @@ jobs:
             build/GodotPlayer-unsigned.ipa
             build/ipa-audit.json
             build/ios-archive-link/results.json
+            build/ios-graphics/results.json
             build/input-ui/results.json
-            build/input-ui/run.log
+            build/input-ui/*.log
+            build/input-ui/*.png
             build/*.log
             build/spine-build.json
             build/spine3-build.json
@@ -224,3 +295,9 @@ jobs:
             build/proof/*.pck
             build/proof/*.log
             build/proof/results.json
+
+  dotnet-interpreter:
+    if: github.event_name == 'workflow_dispatch' && (inputs.dotnet_probe || inputs.dotnet_game_probe)
+    uses: ./.github/workflows/dotnet-probe.yml
+    with:
+      game: ${{ inputs.dotnet_game_probe || false }}

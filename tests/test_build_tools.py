@@ -11,6 +11,7 @@ import zipfile
 from unittest.mock import patch as mock_patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
 
 
 def module(name):
@@ -261,6 +262,8 @@ class BuildToolsTests(unittest.TestCase):
             "drivers/apple_embedded/display_server_apple_embedded.mm",
             "drivers/apple_embedded/SCsub",
             "drivers/sdl/joypad_sdl.cpp",
+            "platform/ios/display_layer_ios.mm",
+            "servers/rendering/shader_compiler.cpp", "servers/rendering/shader_compiler.h",
         ]
         engine = ROOT / ".cache/godot-source"
         archive = ROOT / ".cache/source.zip"
@@ -281,6 +284,7 @@ class BuildToolsTests(unittest.TestCase):
             # The archive must occur once under isolated flags; other drivers
             # retain their original module-enabled compilation environment.
             graph = []
+            dependencies = []
             class DriverEnvironment(dict):
                 drivers_sources = []
                 def __init__(self, flags=()):
@@ -292,14 +296,23 @@ class BuildToolsTests(unittest.TestCase):
                 def add_source_files(self, output, sources):
                     names = [sources] if isinstance(sources, str) else [source.name for source in sources]
                     graph.extend((name, list(self.flags)) for name in names)
+                    output.extend(["GameTools.o", "ToolModels.o"] if sources == "*.swift" else names)
+                def Depends(self, targets, sources):
+                    dependencies.extend((target, source.name) for target in targets for source in sources)
             class Node:
                 abspath = "test-driver"
                 def __init__(self, name): self.name = name
             source = (target / "drivers/apple_embedded/SCsub").read_text()
             body = "\n".join(line for line in source.splitlines() if not line.startswith("from "))
+            def glob(pattern):
+                names = {"*.mm": ["ArchiveSupport.mm", "PlayerRuntime.mm"],
+                         "*.swift": ["GameTools.swift", "ToolModels.swift"],
+                         "*.h": ["bridging_header_apple_embedded.h", "PlayerRuntime.h"],
+                         "*.inc": ["ArchiveCore.inc"]}[pattern]
+                return [Node(name) for name in names]
             exec(compile(body, "SCsub", "exec"), {
                 "Import": lambda *args: None, "env": DriverEnvironment(), "Dir": Node,
-                "Glob": lambda pattern: [Node(name) for name in (["ArchiveSupport.mm", "PlayerRuntime.mm"] if pattern == "*.mm" else ["PlayerApp.swift"])],
+                "Glob": glob,
                 "setup_swift_builder": lambda *args: None,
             })
             archive_flags = [flags for name, flags in graph if name == "ArchiveSupport.mm"]
@@ -307,6 +320,15 @@ class BuildToolsTests(unittest.TestCase):
             self.assertEqual(archive_flags[0][-2:], ["-fno-modules", "-fno-cxx-modules"])
             self.assertIn(("PlayerRuntime.mm", ["-fmodules", "-fcxx-modules"]), graph)
             self.assertIn(("*.swift", ["-fmodules", "-fcxx-modules"]), graph)
+            self.assertIn(("GameTools.o", "ToolModels.swift"), dependencies)
+            self.assertIn(("ToolModels.o", "GameTools.swift"), dependencies)
+            self.assertIn(("GameTools.o", "bridging_header_apple_embedded.h"), dependencies)
+            self.assertIn(("ToolModels.o", "PlayerRuntime.h"), dependencies)
+            self.assertIn(("ToolModels.o", "ArchiveCore.inc"), dependencies)
+            self.assertEqual({target for target, _ in dependencies}, {"GameTools.o", "ToolModels.o"})
+            swift_targets = (target / "platform_methods.py").read_text()
+            self.assertIn('target_suffix = "ios15.0"', swift_targets)
+            self.assertIn('target_suffix = "ios15.0-simulator"', swift_targets)
             service = (target / names[1]).read_text()
             self.assertIn("startPlayerWithArguments:", service)
             self.assertNotIn("exit(0)", service)
@@ -366,6 +388,7 @@ class BuildToolsTests(unittest.TestCase):
             self.assertEqual(runtime.read_bytes(), library.read_bytes())
             data = plistlib.loads(info.read_bytes())
             self.assertTrue(data["UIFileSharingEnabled"])
+            self.assertEqual(data["CFBundleDisplayName"], "Godot Hollow Launcher")
             self.assertEqual(data["MinimumOSVersion"], "15.0")
             declared = {item["UTTypeIdentifier"] for item in data["UTImportedTypeDeclarations"]}
             self.assertTrue({"org.godotengine.pck", "org.godotplayer.apk", "org.godotplayer.embedded-pack"}.issubset(declared))
@@ -382,7 +405,8 @@ class BuildToolsTests(unittest.TestCase):
             self.assertIn("Preserved notice", (app / "en.lproj/InfoPlist.strings").read_text())
             compatibility_notice = export / "limbo-license.txt"
             compatibility_notice.write_text("LimboAI MIT notice", encoding="utf-8")
-            module("prepare_xcode").prepare(export, library, notice, compatibility_notice)
+            module("prepare_xcode").prepare(export, library, notice, compatibility_notice, "4.2")
+            self.assertEqual(plistlib.loads(info.read_bytes())["HollowSpineRuntime"], "4.2")
             self.assertIn("LimboAI MIT notice", (app / "en.lproj/InfoPlist.strings").read_text())
             notice.write_text("", encoding="utf-8")
             with self.assertRaises(RuntimeError):

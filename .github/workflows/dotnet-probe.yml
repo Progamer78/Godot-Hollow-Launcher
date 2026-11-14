@@ -1,0 +1,139 @@
+name: Probe iOS managed interpreter
+on:
+  workflow_dispatch:
+    inputs:
+      game:
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      game:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  pack-import:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: '4.7.2'
+          use-dotnet: false
+          include-templates: false
+      - uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot
+          ref: ed1daf0bf001b61586d9930840f2f1394092c079
+          path: .cache/godot-source
+          persist-credentials: false
+          sparse-checkout: |
+            thirdparty/minizip
+            thirdparty/zlib
+      - name: Exercise encrypted pack import using Apple's native crypto bridge
+        run: |
+          set -o pipefail
+          mkdir -p build/dotnet-probe
+          python3 tools/desktop_proof.py "$(command -v godot)"
+          python3 tools/build_archive_support.py .cache/godot-source build/archive-tests
+          python3 tools/package_fixtures.py
+          godot --headless --path bootstrap --script ../tests/encrypted4.gd -- "$PWD/build/archive-tests"
+          swiftc -swift-version 5 -import-objc-header ios/ArchiveSupport.h ios/PCKInspector.swift ios/ControllerProfile.swift ios/ControlProfile.swift ios/LibraryQuery.swift ios/ToolModels.swift ios/GameToolsState.swift ios/PackageImport.swift ios/ExecutableImport.swift ios/SaveVault.swift ios/GameLibrary.swift tests/models/main.swift -L build/archive-tests -lplayer_archive -Xlinker -lc++ -lz -o build/model-tests
+          build/model-tests 2>&1 | tee build/dotnet-probe/encrypted-pack-models.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Hollow-encrypted-pack-tests
+          path: build/dotnet-probe/encrypted-pack-models.log
+  interpreter:
+    if: '!inputs.game'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build device and simulator interpreter probes
+        run: |
+          set -o pipefail
+          mkdir -p build/dotnet-probe
+          python3 tools/prove_dotnet_ios.py build/dotnet-probe 2>&1 | tee build/dotnet-probe/build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Hollow-dotnet-interpreter-probe
+          path: |
+            build/dotnet-probe/*.json
+            build/dotnet-probe/*.log
+            build/dotnet-probe/*.ips
+  godot-game:
+    if: inputs.game
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify proof compiler and SDK
+        id: toolchain
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, subprocess
+          commands = [['xcodebuild', '-version'], ['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-version'], ['xcrun', 'clang', '--version']]
+          version = '\n'.join(subprocess.check_output(command, text=True) for command in commands)
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write('fingerprint=' + hashlib.sha256(version.encode()).hexdigest()[:16] + '\n')
+          PY
+      - name: Restore C# scene runner compiler cache
+        id: engine_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/hollow-dotnet-proof-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-hollow-dotnet-proof-v1-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('runtime_dotnet/**', 'tools/patch_dotnet.py', 'tools/prove_godot_dotnet_ios.py', 'tools/stage_dotnet_runtime.py') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-hollow-dotnet-proof-v1-${{ steps.toolchain.outputs.fingerprint }}-
+      - uses: actions/checkout@v4
+        with:
+          repository: godotengine/godot
+          ref: ed1daf0bf001b61586d9930840f2f1394092c079
+          path: .cache/godot-source
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: '4.7.2'
+          use-dotnet: false
+          include-templates: false
+      - name: Build the native Godot and Mono scene runner
+        id: engine_build
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          python3 -m venv .cache/dotnet-proof-env
+          .cache/dotnet-proof-env/bin/pip install scons==4.10.1
+          dotnet run --project tests/dotnet-metadata/Hollow.Metadata.Tests.csproj --configuration Release
+          mkdir -p build/godot-dotnet-proof
+          .cache/dotnet-proof-env/bin/python tools/prove_godot_dotnet_ios.py .cache/godot-source build/godot-dotnet-proof --graphics --phase build 2>&1 | tee build/godot-dotnet-proof/build.log
+      - name: Save compiled scene runner before executing the game
+        if: steps.engine_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/hollow-dotnet-proof-cache
+          key: ${{ steps.engine_cache.outputs.cache-primary-key }}
+      - name: Execute the independent C# game on iOS Simulator
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          .cache/dotnet-proof-env/bin/python tools/prove_godot_dotnet_ios.py .cache/godot-source build/godot-dotnet-proof --graphics --phase run 2>&1 | tee build/godot-dotnet-proof/execution.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Hollow-Godot-CSharp-game-proof
+          path: |
+            build/godot-dotnet-proof/*.json
+            build/godot-dotnet-proof/*.log
+            build/godot-dotnet-proof/*.ips
+            build/godot-dotnet-proof/*.png

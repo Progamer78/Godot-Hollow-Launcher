@@ -67,6 +67,7 @@ struct GameScreen: View {
     @State private var editingStickID: UUID?
     @State private var showingController = false
     @State private var showingGestures = false
+    @StateObject private var toolsState = GameToolsState()
     @StateObject private var controllerInput = ControllerInput()
     @State private var showingTools = false
     @State private var controlArea = CGSize.zero
@@ -83,6 +84,13 @@ struct GameScreen: View {
     @State private var menuHeight: CGFloat = 220
     @AppStorage("playerMenuX") private var menuX = 1.0
     @AppStorage("playerMenuY") private var menuY = 0.0
+    @AppStorage("hollowKeepAwake") private var keepAwake = true
+    @AppStorage("hollowPerformanceHUD") private var showPerformance = false
+    @AppStorage("hollowHUDCorner") private var hudCorner = "topLeft"
+    @State private var performance: ToolReply?
+    @AppStorage("hollowPinnedMonitor") private var showPins = false
+    @State private var pinMonitor = PinnedMonitorState()
+    @State private var pinnedReadouts: [PinnedReadout] = []
     @GestureState private var menuTranslation = CGSize.zero
 
     init(session: GameSession) {
@@ -122,6 +130,16 @@ struct GameScreen: View {
                         Text(inputStatus).font(.system(.caption2, design: .monospaced)).padding(6).background(Color.black.opacity(0.75)).foregroundColor(.green).allowsHitTesting(false)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     }
+                    if showPerformance && launchReady && !editing {
+                        HollowPerformanceHUD(reply: performance).padding(8)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: performanceAlignment)
+                            .allowsHitTesting(false)
+                    }
+                    if showPins && launchReady && !editing && !pinnedReadouts.isEmpty {
+                        HollowPinnedHUD(rows: pinnedReadouts).padding(8)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: pinnedAlignment)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .coordinateSpace(name: "playerControls")
                 .onAppear { updateArea(area.size) }
@@ -143,6 +161,7 @@ struct GameScreen: View {
         .sheet(isPresented:$showingGestures) {
             GestureEditor(value:profile.gestures ?? TouchGestures(),onSave:{ value in
                 profile.gestures=value
+                if value.secondFingerButton != nil { profile.mouseMode = "trackpad"; profile.setMouseEnabled(true) }
                 _ = library.saveControls(profile,visible:showButtons,for:session.id)
             })
         }
@@ -158,10 +177,17 @@ struct GameScreen: View {
         .onReceive(heartbeat) { now in
             guard phase == .active else { return }
             controllerInput.configure(profile.controller,active:launchReady && !editing && !menuOpen && !showingTools && !showingKeyboard && !showingController && !showingGestures,view:session.controller.view)
-            if launchReady { _ = ToolsBridge.send(["action": "tick"]) }
+            if launchReady {
+                _ = ToolsBridge.send(["action": "tick"])
+            }
             if now.timeIntervalSince(lastTick) >= 1 {
                 lastTick = now
                 let status = ToolsBridge.send(["action": "status"])
+                if showPerformance { performance = status }
+                if showPins {
+                    let pins = library.games.first { $0.id == session.id }?.savedCheats ?? []
+                    pinnedReadouts = pinMonitor.poll(pins)
+                }
                 if !launchReady, status.ready == true {
                     launchReady = true; library.journal(session.game, status: "running"); library.markPlayed(session.id)
                     if let fps = session.game.frameLimit, fps != 0 { _ = ToolsBridge.send(["action": "options", "fps": fps]) }
@@ -191,10 +217,12 @@ struct GameScreen: View {
         }
         .sheet(isPresented: $showingTools, onDismiss: {
             syncMouseMode()
-        }) { GameTools(gameID: session.id) }
-        .onAppear { GameInput.outputDevice=profile.controller?.enabled == true ? 0 : nil; syncMouseMode() }
-        .onDisappear { controllerInput.stop(); GameInput.release(); PlayerRuntime.setMouseEnabled(false) }
+        }) { GameTools(gameID: session.id, state: toolsState) }
+        .onAppear { toolsState.setSearchActive(phase == .active, send: ToolsBridge.send); GameInput.outputDevice=profile.controller?.enabled == true ? 0 : nil; UIApplication.shared.isIdleTimerDisabled = keepAwake; syncMouseMode() }
+        .onDisappear { toolsState.setSearchActive(false); controllerInput.stop(); GameInput.release(); PlayerRuntime.setMouseEnabled(false); UIApplication.shared.isIdleTimerDisabled = false }
         .onChange(of: phase) { value in
+            toolsState.setSearchActive(value == .active)
+            UIApplication.shared.isIdleTimerDisabled = keepAwake && value == .active
             if value != .active {
                 controllerInput.stop()
                 showingKeyboard = false
@@ -251,8 +279,7 @@ struct GameScreen: View {
                     }
                     Button(profile.mouseEnabled ? "Mouse: On" : "Mouse: Off") {
                         var updated = profile
-                        updated.mouseEnabled.toggle()
-                        if updated.mouseEnabled && updated.joystick?.mode == "floating" { updated.joystick?.mode = "fixed" }
+                        updated.setMouseEnabled(!updated.mouseEnabled)
                         if library.saveControls(updated, visible: showButtons, for: session.id) {
                             profile = updated
                             syncMouseMode()
@@ -260,8 +287,8 @@ struct GameScreen: View {
                         }
                     }
                 }
-                if profile.joystick?.mode == "floating" {
-                    Text("Floating joystick: drag anywhere outside the buttons and menu. Mouse mode is off.").font(.caption)
+                if profile.sticks.contains(where: { $0.mode == "floating" }) {
+                    Text("Floating joysticks use their assigned touch regions. Touch mouse mode is off.").font(.caption)
                 }
                 Button("Edit Controls") {
                     GameInput.release()
@@ -275,8 +302,12 @@ struct GameScreen: View {
                     Button("Controller Bindings") { controllerInput.stop(); GameInput.release(); PlayerRuntime.configureController(true); menuOpen=false; showingController=true }
                     Button("Touch Gestures") { controllerInput.stop(); GameInput.release(); menuOpen=false; showingGestures=true }
                 }
-                Button(debuggingInput ? "Hide Input Monitor" : "Show Input Monitor") { debuggingInput.toggle(); menuOpen = false }
-                Button("Release All Inputs") { GameInput.release() }
+                Group {
+                    Button(debuggingInput ? "Hide Input Monitor" : "Show Input Monitor") { debuggingInput.toggle(); menuOpen = false }
+                    Button(showPerformance ? "Hide Performance HUD" : "Show Performance HUD") { showPerformance.toggle(); menuOpen = false }
+                    Button(showPins ? "Hide Pinned Monitor" : "Show Pinned Monitor") { showPins.toggle(); menuOpen = false }
+                }
+                Button("Release All Inputs") { controllerInput.stop(); GameInput.release() }
                 Button {
                     GameInput.release()
                     PlayerRuntime.setMouseEnabled(false)
@@ -312,6 +343,22 @@ struct GameScreen: View {
     private func menuPoint(in size: CGSize) -> CGPoint {
         CGPoint(x: min(max(22, 22 + CGFloat(menuX) * max(0, size.width - 44) + menuTranslation.width), max(22, size.width - 22)),
                 y: min(max(22, 22 + CGFloat(menuY) * max(0, size.height - 44) + menuTranslation.height), max(22, size.height - 22)))
+    }
+    private var performanceAlignment: Alignment {
+        switch hudCorner {
+        case "topRight": return .topTrailing
+        case "bottomLeft": return .bottomLeading
+        case "bottomRight": return .bottomTrailing
+        default: return .topLeading
+        }
+    }
+    private var pinnedAlignment: Alignment {
+        switch hudCorner {
+        case "topRight": return .bottomLeading
+        case "bottomLeft": return .topTrailing
+        case "bottomRight": return .topLeading
+        default: return .bottomTrailing
+        }
     }
 
     private func joystickPoint(_ joystick: JoystickControl, in size: CGSize) -> CGPoint {

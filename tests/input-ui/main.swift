@@ -1,4 +1,5 @@
 import UIKit
+import SwiftUI
 import ObjectiveC
 
 // Engine endpoints are recorded here; the UIKit views and GameInput are the
@@ -35,8 +36,19 @@ enum ToolsBridge {
 @main
 final class InputSmokeApp: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
+    private var checkLog: [String] = []
+    private func record(_ message: String) { checkLog.append(message); print(message); fflush(stdout) }
+    private func finish(_ success: Bool, _ message: String) {
+        record("PLAYER_INPUT_UI_\(success ? "PASS" : "FAIL"): \(message)")
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try checkLog.joined(separator: "\n").write(to: folder.appendingPathComponent("input-ui-result.log"), atomically: true, encoding: .utf8)
+        } catch { print("Could not record input test result: \(error)") }
+        fflush(stdout); exit(success ? 0 : 1)
+    }
     private func check(_ value: @autoclosure () -> Bool, _ message: String) {
-        if !value() { print("PLAYER_INPUT_UI_FAIL: \(message)"); fflush(stdout); exit(1) }
+        if !value() { finish(false, message) }
     }
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         let controller = UIViewController()
@@ -60,7 +72,7 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
                 button.removeFromSuperview()
             }
         }
-        print("PLAYER_INPUT_UI_CHECK: control lifetime PASS")
+        record("PLAYER_INPUT_UI_CHECK: control lifetime PASS")
         let joystick = JoystickTouchView(frame: CGRect(x: 0, y: 0, width: 128, height: 128))
         joystick.configuration.output = "gamepad"
         root.addSubview(joystick)
@@ -87,7 +99,7 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
         GameInput.key("Pad A",pressed:true); GameInput.release()
         check(ToolsBridge.commands.contains { ($0["device"] as? Int) == 0 && ($0["kind"] as? String) == "button" && ($0["pressed"] as? Bool) == false },"Controller profile release reaches player-one output")
         GameInput.outputDevice=nil
-        print("PLAYER_INPUT_UI_CHECK: joystick, keyboard, Unicode and release PASS")
+        record("PLAYER_INPUT_UI_CHECK: joystick, keyboard, Unicode and release PASS")
         let mouse = MouseTouchView(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
         root.addSubview(mouse)
         // Exercise the same updater used by the display-link callback directly.
@@ -97,15 +109,61 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
         let positionsBefore = PlayerRuntime.cursorPositionReads
         let visibilityBefore = PlayerRuntime.cursorVisibilityReads
         mouse.updateCursor()
+        var gestures = TouchGestures(); gestures.enabled = true; gestures.secondFingerClick = "right"
+        mouse.configureGestures(gestures)
+        check(mouse.gestureRecognizers?.allSatisfy { !$0.isEnabled } == true, "Second-finger click must disable conflicting recognizers without intercepting the pointer")
+        gestures.secondFingerClick = nil
+        mouse.configureGestures(gestures)
+        check(mouse.gestureRecognizers?.contains { $0.isEnabled } == true, "Ordinary trackpad gestures resume when second-finger click is off")
         check(PlayerRuntime.cursorPolls == before + 1 && PlayerRuntime.cursorPositionReads == positionsBefore + 1 && PlayerRuntime.cursorVisibilityReads == visibilityBefore + 1, "Cursor updater reads revision, position and visibility")
         check(mouse.subviews.first?.frame.origin == CGPoint(x: 20, y: 20) && mouse.subviews.first?.isHidden == false, "Cursor updater applies the game position and visibility to the view")
-        print("PLAYER_INPUT_UI_CHECK: cursor state and view update PASS")
+        record("PLAYER_INPUT_UI_CHECK: cursor state and view update PASS")
         DispatchQueue.main.async {
             mouse.stop(); mouse.removeFromSuperview()
             joystick.removeFromSuperview()
             keyboard.dismissKeyboard(notify: false); keyboard.removeFromSuperview()
-            print("PLAYER_INPUT_UI_PASS: control construction/lifetime, cursor, keyboard, Unicode and release")
-            fflush(stdout); exit(0)
+            self.exercisePinnedMonitor(root)
+        }
+    }
+
+    private func exercisePinnedMonitor(_ root: UIView) {
+        // Compare actual rendered pixels with an identical very long name but
+        // different values. In the old combined/truncated Text both images
+        // were identical: the value was entirely offscreen behind the name.
+        let name = String(repeating: "/root/GlobalState.characters.relationships.long_variable_name", count: 20)
+        let pinID = UUID()
+        let host = UIHostingController(rootView: HollowPinnedHUD(rows: [PinnedReadout(id: pinID, name: name, value: "12345")]))
+        window?.rootViewController?.addChild(host)
+        host.view.frame = CGRect(x: 0, y: 140, width: 240, height: 110)
+        host.view.backgroundColor = .black
+        root.addSubview(host.view); host.didMove(toParent: window?.rootViewController)
+        host.view.setNeedsLayout(); host.view.layoutIfNeeded()
+        func rendered() -> UIImage {
+            host.view.layoutIfNeeded()
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true; format.preferredRange = .standard
+            return UIGraphicsImageRenderer(size: host.view.bounds.size, format: format).image { _ in
+                self.check(host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true), "Pin monitor renders into the test image")
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            let firstImage = rendered()
+            host.rootView = HollowPinnedHUD(rows: [PinnedReadout(id: pinID, name: name, value: "98765")])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                let secondImage = rendered()
+                let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                try? firstImage.pngData()?.write(to: folder.appendingPathComponent("hud-long-name-first.png"))
+                try? secondImage.pngData()?.write(to: folder.appendingPathComponent("hud-long-name-second.png"))
+                guard let first = firstImage.cgImage?.dataProvider?.data, let second = secondImage.cgImage?.dataProvider?.data else {
+                    self.finish(false, "Pin monitor pixel data unavailable"); return
+                }
+                let a = first as Data, b = second as Data
+                self.check(a.count == b.count, "Pin monitor rendering has consistent pixel dimensions")
+                let changed = zip(a, b).reduce(0) { $0 + ($1.0 == $1.1 ? 0 : 1) }
+                self.check(changed > 100, "Long pin name must leave the changing value visible (changed bytes: \(changed))")
+                self.record("PLAYER_INPUT_UI_CHECK: long-name pin monitor values visible PASS (\(changed) changed pixel bytes)")
+                host.willMove(toParent: nil); host.view.removeFromSuperview(); host.removeFromParent()
+                self.finish(true, "control construction/lifetime, cursor, keyboard, Unicode, release and long-name pinned HUD values")
+            }
         }
     }
 }

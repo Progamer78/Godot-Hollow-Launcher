@@ -102,14 +102,7 @@ struct ControllerEditor: View {
                 }
                 Section(header:Text("Buttons and direction keys")) {
                     ForEach(Array(Set(ControllerProfile.defaults.keys).union(available).union(profile.bindings.keys)).sorted(),id:\.self) { name in
-                        VStack(alignment:.leading) {
-                            Text(name).font(.caption)
-                            Picker("Input",selection:Binding(get:{ profile.target(name) },set:{ profile.bindings[name]=$0 })) {
-                                ForEach((["None"]+ControlKeys.all).contains(profile.target(name)) ? ["None"]+ControlKeys.all : [profile.target(name),"None"]+ControlKeys.all,id:\.self) { Text($0).tag($0) }
-                            }
-                            TextField("Key, Pad A, Mouse Left, or None",text:Binding(get:{ profile.target(name) },set:{ profile.bindings[name]=$0 }))
-                                .autocapitalization(.none).disableAutocorrection(true)
-                        }
+                        bindingRow(name)
                     }
                 }
                 Text("Examples: Space, Enter, Escape, Shift, W, Pad A, Pad R2, Mouse Left. Assign a stick to Mouse and a button to Mouse Left for pointer control.").font(.caption)
@@ -120,7 +113,7 @@ struct ControllerEditor: View {
             }
         }.navigationViewStyle(StackNavigationViewStyle())
         .onReceive(timer) { _ in
-            guard let c=GCController.controllers().first else { status="No controller connected."; return }
+            guard let c=GCController.controllers().first else { status="No controller connected."; available=[]; return }
             let buttons=ControllerSnapshot.buttons(c)
             available=buttons.map { $0.0 }
             let pressed=buttons.filter { $0.1.isPressed }.map { $0.0 }.joined(separator:", ")
@@ -129,5 +122,17 @@ struct ControllerEditor: View {
     }
     private func modePicker(_ title: String,mode: Binding<String>) -> some View {
         Picker(title,selection:mode) { Text("Gamepad").tag("gamepad"); Text("Keys").tag("keys"); Text("Mouse").tag("mouse"); Text("Off").tag("off") }
+    }
+    private func bindingRow(_ name: String) -> some View {
+        let selection = Binding<String>(get: { profile.target(name) }, set: { profile.bindings[name] = $0 })
+        let standard = ["None"] + ControlKeys.all
+        let choices = standard.contains(selection.wrappedValue) ? standard : [selection.wrappedValue] + standard
+        return VStack(alignment: .leading, spacing: 6) {
+            Picker(name, selection: selection) { ForEach(choices, id: \.self) { Text($0).tag($0) } }
+            DisclosureGroup("Custom key name") {
+                TextField("For example: F13", text: selection).autocapitalization(.none).disableAutocorrection(true)
+                    .accessibilityLabel("Custom input for \(name)")
+            }.font(.caption)
+        }.padding(.vertical, 3)
     }
 }
