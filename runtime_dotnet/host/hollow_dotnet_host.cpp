@@ -8,6 +8,25 @@
 #include "modules/mono/utils/path_utils.h"
 #include <mono/jit/jit.h>
 #include <cstdio>
+#ifdef APPLE_EMBEDDED_ENABLED
+#include <CoreFoundation/CoreFoundation.h>
+#include <limits.h>
+#endif
+
+static String trusted_bundle_root() {
+#ifdef APPLE_EMBEDDED_ENABLED
+	// The signed runtime belongs to the real application, regardless of the
+	// game's resource/executable paths or export scaffolding's godot_path.
+	CFBundleRef bundle = CFBundleGetMainBundle();
+	CFURLRef url = bundle ? CFBundleCopyBundleURL(bundle) : nullptr;
+	char path[PATH_MAX];
+	const bool valid = url && CFURLGetFileSystemRepresentation(url, true, reinterpret_cast<UInt8 *>(path), sizeof(path));
+	if (url) CFRelease(url);
+	return valid ? String::utf8(path) : String();
+#else
+	return OS::get_singleton()->get_bundle_resource_dir();
+#endif
+}
 
 extern "C" int coreclr_initialize(const char *, const char *, int, const char **, const char **, void **, unsigned int *);
 extern "C" void *mono_aot_module_System_Private_CoreLib_info;
@@ -53,7 +72,8 @@ static bool windows_runtime_component(const String &name) {
 int hollow_dotnet_initialize(const char *, const char *, int, const char **, const char **, void **handle, unsigned int *domain) {
 	const String assembly = Path::get_csharp_project_name();
 	ERR_FAIL_COND_V_MSG(assembly.is_empty() || assembly.get_file() != assembly || assembly.contains(":"), -1, "Invalid managed game assembly name.");
-	const String bundled = OS::get_singleton()->get_bundle_resource_dir();
+	const String bundled = trusted_bundle_root();
+	ERR_FAIL_COND_V_MSG(bundled.is_empty(), -1, "Could not locate the signed application bundle.");
 	const String managed = bundled.path_join("Managed");
 	Ref<DirAccess> platform = DirAccess::open(managed);
 	ERR_FAIL_COND_V_MSG(platform.is_null(), -1, "The trusted managed runtime was not bundled.");

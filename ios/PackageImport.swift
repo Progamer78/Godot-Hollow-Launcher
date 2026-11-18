@@ -30,16 +30,16 @@ enum PackageImport {
         case "pck":
             let bytes = try source.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             try checkSpace(destination, bytes: UInt64(max(0, bytes)))
-            progress?("Copying gameâ€¦")
+            progress?("Copying gameÃ¢â‚¬Â¦")
             try FileManager.default.copyItem(at: source, to: destination); return nil
         case "exe": try embedded(source, destination: destination); return "Original embedded PCK extracted; the executable was not run."
         case "apk", "zip":
-            progress?("Reading archiveâ€¦")
+            progress?("Reading archiveÃ¢â‚¬Â¦")
             let files = try entries(source)
             let packs = files.filter { !$0.directory && ($0.name as NSString).pathExtension.lowercased() == "pck" && !$0.name.hasSuffix(".sparsepck") }
             if packs.count == 1 {
                 try checkSpace(destination, bytes: packs[0].size)
-                progress?("Extracting gameâ€¦")
+                progress?("Extracting gameÃ¢â‚¬Â¦")
                 try extract(source, entry: packs[0], destination: destination, limit: 16 << 30)
                 if source.pathExtension.lowercased() == "zip" {
                     let folder = (packs[0].name as NSString).deletingLastPathComponent
@@ -74,7 +74,7 @@ enum PackageImport {
                 try validateSparseIndex(source, index: index, assets: assets, temporary: destination.appendingPathExtension("index"))
             }
             try checkSpace(destination, bytes: assets.reduce(UInt64(0)) { $0 + $1.size } + (assets.map(\.size).max() ?? 0))
-            progress?("Preparing Android assetsâ€¦")
+            progress?("Preparing Android assetsÃ¢â‚¬Â¦")
             try wrapAssets(source, assets: assets, destination: destination, engineHint: engineHint)
             let libraries = files.filter { $0.name.hasPrefix("lib/") && $0.name.hasSuffix(".so") && !$0.name.contains("libgodot") }.prefix(8).map(\.name)
             return "Original APK asset bytes wrapped in a standalone PCK. Header records the inferred engine family; exact original engine version is unknown. Android plugins and platform-specific textures may prevent execution." + (libraries.isEmpty ? "" : " Ignored Android libraries: \(libraries.joined(separator: ", ")).")
@@ -83,12 +83,12 @@ enum PackageImport {
     }
     // Called while the archive's coordinated/security-scoped read is active.
     // Native EXEs are inspected only for original export keys, never executed.
-    static func inspectPrepared(_ pack: URL, source: URL, note: String?, existingKey: Data? = nil, progress: ((String) -> Void)? = nil) throws -> PreparedGame {
-        progress?("Checking game compatibilityâ€¦")
-        if let key = existingKey, let info = try? ExecutableImport.inspect(pack, key: key, externalFiles: GameFiles.staging(for: pack)) {
+    static func inspectPrepared(_ pack: URL, source: URL, note: String?, existingKey: Data? = nil, allowDotnet: Bool = DotnetRuntime.bundled, progress: ((String) -> Void)? = nil) throws -> PreparedGame {
+        progress?("Checking game compatibilityÃ¢â‚¬Â¦")
+        if let key = existingKey, let info = try? ExecutableImport.inspect(pack, key: key, externalFiles: GameFiles.staging(for: pack), allowDotnet: allowDotnet) {
             return PreparedGame(pack: info, note: note, key: info.needsKey ? key : nil)
         }
-        do { return PreparedGame(pack: try PCKInspector.inspect(pack, externalAssembly: GameFiles.externalAssembly(in: GameFiles.staging(for: pack))), note: note, key: nil) }
+        do { return PreparedGame(pack: try PCKInspector.inspect(pack, allowDotnet: allowDotnet, externalAssembly: GameFiles.externalAssembly(in: GameFiles.staging(for: pack))), note: note, key: nil) }
         catch let error as PackError {
             guard error.recoveryMajor != nil, source.pathExtension.lowercased() == "zip" else { throw error }
         }
@@ -107,11 +107,11 @@ enum PackageImport {
         let temporary = pack.deletingLastPathComponent().appendingPathComponent("original-\(UUID().uuidString).exe")
         defer { try? FileManager.default.removeItem(at: temporary) }
         for (index, candidate) in candidates.prefix(8).enumerated() {
-            progress?("Checking original runtime \(index + 1) of \(min(8, candidates.count))â€¦")
+            progress?("Checking original runtime \(index + 1) of \(min(8, candidates.count))Ã¢â‚¬Â¦")
             try checkSpace(temporary, bytes: candidate.size)
             try extract(source, entry: candidate, destination: temporary, limit: 128 * 1024 * 1024)
             do {
-                let recovered = try ExecutableImport.recover(executable: temporary, pack: pack, externalFiles: GameFiles.staging(for: pack))
+                let recovered = try ExecutableImport.recover(executable: temporary, pack: pack, externalFiles: GameFiles.staging(for: pack), allowDotnet: allowDotnet)
                 if recovered.1 != nil {
                     return PreparedGame(pack: recovered.0, note: (note.map { $0 + " " } ?? "") + "Original EXE found in ZIP; encrypted directory/scripts validated. Game files are unchanged.", key: recovered.1)
                 }

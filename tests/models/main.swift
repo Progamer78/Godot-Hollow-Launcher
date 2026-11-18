@@ -370,6 +370,30 @@ do {
 print("Godot 4 encrypted directory/assets, real AES-CFB integrity, original EXE/ZIP recovery and key persistence passed")
 
 do {
+    let fixtures = URL(fileURLWithPath: "build/archive-tests")
+    let original = fixtures.appendingPathComponent("encrypted4-external.pck")
+    let executable = fixtures.appendingPathComponent("original4-fixture.exe")
+    let dll = temporary.appendingPathComponent("Game.dll")
+    try Data("Assembly presence fixture; never executed".utf8).write(to: dll)
+    for prefix in ["", "download/"] {
+        let archive = temporary.appendingPathComponent("external-\(UUID().uuidString).zip")
+        try GPArchive.create(archive.path, files: [original.path, executable.path, dll.path], names: [prefix + "Game.pck", prefix + "Game.exe", prefix + "data_Game_windows_x86_64/Game.dll"])
+        let copied = temporary.appendingPathComponent("external-\(UUID().uuidString).pck")
+        let note = try PackageImport.prepare(archive, destination: copied)
+        require(GameFiles.externalAssembly(in: GameFiles.staging(for: copied)), "Root and nested ZIPs must stage external game assemblies before key recovery")
+        let result = try PackageImport.inspectPrepared(copied, source: archive, note: note, allowDotnet: true)
+        require(result.pack.requiresDotnet == true && result.key == Data((0..<32).map { UInt8($0) }), "Complete encrypted Windows C# ZIP must import with its actual key and external assembly")
+    }
+    do {
+        _ = try ExecutableImport.recover(executable: executable, pack: original, allowDotnet: true)
+        fatalError("Missing external C# assembly accepted")
+    } catch {
+        require(error.localizedDescription.contains("unlocked") && error.localizedDescription.contains("data_"), "A verified key must expose the missing assembly error instead of claiming no matching key")
+    }
+}
+print("Root/nested encrypted Windows C# ZIPs, external assembly staging and verified-key diagnostics passed")
+
+do {
     let identity = UUID(), base = temporary.appendingPathComponent("TextSaves")
     let gameFolder = base.appendingPathComponent(identity.uuidString)
     try FileManager.default.createDirectory(at: gameFolder, withIntermediateDirectories: true)

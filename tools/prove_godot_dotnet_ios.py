@@ -31,6 +31,8 @@ def build(engine, output, graphics=False):
     mono = stage(output / 'runtime', 'iossimulator-arm64', compiled / 'GodotSharp.dll')
     shutil.copytree(ROOT / 'runtime_shared/player_tools', engine / 'modules/player_tools')
     patch(engine, proof=True)
+    from patch_game_paths import patch as patch_game_paths
+    patch_game_paths(engine)
     if graphics:
         patch_graphics(engine)
         patch_sampler_arrays(engine)
@@ -84,20 +86,45 @@ def execute(output, graphics=False):
         run(['xcrun','simctl','boot',device]);run(['xcrun','simctl','bootstatus',device,'-b'],timeout=300)
         run(['xcrun','simctl','install',device,app],timeout=300)
         container=Path(capture(['xcrun','simctl','get_app_container',device,'org.godotplayer.dotnetgameproof','data'],text=True).strip())
-        documents=container / 'Documents'; documents.mkdir(exist_ok=True);shutil.copyfile(pack,documents / 'game.pck')
-        run(['xcrun','simctl','launch','--stdout=' + str(output / 'stdout.log'),'--stderr=' + str(output / 'stderr.log'),device,'org.godotplayer.dotnetgameproof', *(['--hollow-graphics'] if graphics else [])],timeout=180)
-        complete=documents / 'native-result.json';deadline=time.monotonic()+120
-        while not complete.is_file() and time.monotonic()<deadline:time.sleep(0.25)
-        if not complete.is_file():raise RuntimeError('Godot C# game did not complete; see native logs')
-        shutil.copyfile(complete,output / 'native-result.json')
-        native_result=json.loads(complete.read_text(encoding='utf-8'))
-        if native_result.get('native_result')!=0:raise RuntimeError('Godot startup/loop failed: ' + str(native_result))
-        results=list(container.rglob('dotnet-proof.json'))
-        if len(results)!=1:raise RuntimeError('Original game did not write its gameplay proof record')
-        result=json.loads(results[0].read_text(encoding='utf-8'));result['scope']=('Real Godot OpenGL scene and framebuffer sampling' if graphics else 'Real Godot headless scene execution') + ' on ARM64 iOS Simulator; physical device and launcher integration untested'
+        documents=container / 'Documents'; documents.mkdir(exist_ok=True)
+        cases = {}
+        for mode in ['packed', 'external']:
+            case = output / mode; case.mkdir(exist_ok=True)
+            selected = pack
+            if mode == 'external':
+                selected = output / 'external-csharp.pck'
+                run(['godot','--headless','--path',fixture,'--script','pack.gd','--',selected,compiled / 'HollowDotnetProof.dll','external'])
+                run([inspector,selected,'--external'])
+                data = documents / 'GameFiles/data_HollowDotnetProof_windows_x86_64'
+                data.mkdir(parents=True,exist_ok=True)
+                for dll in ['HollowDotnetProof.dll', 'HollowLegacyProof.dll']: shutil.copyfile(compiled / dll, data / dll)
+            # Each layout starts a fresh engine process using the same installed
+            # signed app and already-booted simulator. No second simulator boot.
+            for result_file in container.rglob('dotnet-proof.json'): result_file.unlink()
+            complete=documents / 'native-result.json'
+            complete.unlink(missing_ok=True)
+            shutil.copyfile(selected,documents / 'game.pck')
+            run(['xcrun','simctl','launch','--stdout=' + str(case / 'stdout.log'),'--stderr=' + str(case / 'stderr.log'),device,'org.godotplayer.dotnetgameproof', *(['--hollow-graphics'] if graphics else [])],timeout=180)
+            deadline=time.monotonic()+120
+            while not complete.is_file() and time.monotonic()<deadline:time.sleep(0.25)
+            if not complete.is_file():raise RuntimeError('Godot C# ' + mode + ' game did not complete; see native logs')
+            shutil.copyfile(complete,case / 'native-result.json')
+            native_result=json.loads(complete.read_text(encoding='utf-8'))
+            if native_result.get('native_result')!=0:raise RuntimeError('Godot startup/loop failed: ' + str(native_result))
+            results=list(container.rglob('dotnet-proof.json'))
+            if len(results)!=1:raise RuntimeError('Original game did not write its gameplay proof record')
+            result=json.loads(results[0].read_text(encoding='utf-8'));result['scope']=('Real Godot OpenGL scene and framebuffer sampling' if graphics else 'Real Godot headless scene execution') + ' on ARM64 iOS Simulator, with separate game directory; physical device and launcher UI integration untested'
+            result['assembly_layout'] = mode
+            (case / 'results.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
+            if not result.get('passed') or not result.get('godot_game_execution') or result.get('frames')!=8:raise RuntimeError('Original C# game reported a failed assertion')
+            if graphics and not result.get('sampler_array_rendering'): raise RuntimeError('Sampler-array rendering did not run')
+            cases[mode] = result
+            for source in documents.glob('*.log'):shutil.copyfile(source,case / source.name)
+            for source in container.rglob('sampler-proof.png'):shutil.copyfile(source,case / source.name)
+            subprocess.run(['xcrun','simctl','terminate',device,'org.godotplayer.dotnetgameproof'],capture_output=True,timeout=30)
+        result = {**cases['external'], 'cases': cases}
         (output / 'results.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
-        if not result.get('passed') or not result.get('godot_game_execution') or result.get('frames')!=8:raise RuntimeError('Original C# game reported a failed assertion')
-        if graphics and not result.get('sampler_array_rendering'): raise RuntimeError('Sampler-array rendering did not run')
+        shutil.copyfile(output / 'external/native-result.json', output / 'native-result.json')
     finally:
         if container:
             for source in (container / 'Documents').glob('*.log'):shutil.copyfile(source,output / source.name)

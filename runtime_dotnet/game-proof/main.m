@@ -15,6 +15,9 @@ extern const char *HollowGodotProofSavePath(void);
     // The pack is supplied to Documents after this app has already been built.
     dispatch_async(dispatch_get_main_queue(), ^{
         NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        NSString *content = [documents stringByAppendingPathComponent:@"GameFiles"];
+        [NSFileManager.defaultManager createDirectoryAtPath:content withIntermediateDirectories:YES attributes:nil error:nil];
+        setenv("HOLLOW_GAME_FILES", content.fileSystemRepresentation, 1);
         fprintf(stderr, "HOLLOW_NATIVE_PROOF_START\n"); fflush(stderr);
         if ([NSProcessInfo.processInfo.arguments containsObject:@"--hollow-graphics"]) {
             int result = HollowPrepareGodotGraphics(NSBundle.mainBundle.executablePath.UTF8String,
