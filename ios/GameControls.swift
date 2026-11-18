@@ -161,7 +161,7 @@ struct GameScreen: View {
         .sheet(isPresented:$showingGestures) {
             GestureEditor(value:profile.gestures ?? TouchGestures(),onSave:{ value in
                 profile.gestures=value
-                if value.secondFingerButton != nil { profile.mouseMode = "trackpad"; profile.setMouseEnabled(true) }
+                if value.secondFingerButton != nil || value.enabled { profile.mouseMode = "trackpad"; profile.setMouseEnabled(true) }
                 _ = library.saveControls(profile,visible:showButtons,for:session.id)
             })
         }
@@ -313,7 +313,7 @@ struct GameScreen: View {
                     PlayerRuntime.setMouseEnabled(false)
                     menuOpen = false
                     showingTools = true
-                } label: { Label("Game Tools · Cheats & Console", systemImage: "slider.horizontal.3") }
+                } label: { Label("Game Tools Â· Cheats & Console", systemImage: "slider.horizontal.3") }
                 if profile.mouseEnabled {
                     HStack(spacing: 16) {
                         Button(profile.mouseMode == "trackpad" ? "Trackpad" : "Direct Touch") {
@@ -325,15 +325,15 @@ struct GameScreen: View {
                                 menuOpen = false
                             }
                         }
-                        Button("Scroll ↑") { PlayerRuntime.scrollMouse(1) }
-                        Button("Scroll ↓") { PlayerRuntime.scrollMouse(-1) }
+                        Button("Scroll â†‘") { PlayerRuntime.scrollMouse(1) }
+                        Button("Scroll â†“") { PlayerRuntime.scrollMouse(-1) }
                     }
                     HStack(spacing: 12) {
                         KeySurface(title: "Left Click", key: "Mouse Left").frame(width: 84, height: 44)
                         KeySurface(title: "Right Click", key: "Mouse Right").frame(width: 88, height: 44)
                     }
                 }
-                Text("Drag the ⋯ button to move it. Tap it to close this menu.").font(.caption)
+                Text("Drag the â‹¯ button to move it. Tap it to close this menu.").font(.caption)
             }
         }
         .padding(12).foregroundColor(.white)

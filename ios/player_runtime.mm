@@ -137,7 +137,11 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
         }
         pending_script_key=nil;
         godot3->controllerOverride(controller_override.load());
-        return godot3->start(packPath, savePath, renderer, orientation, error);
+        UIViewController *controller = godot3->start(packPath, savePath, renderer, orientation, error);
+        // Upstream bootstrap changes cwd to its signed executable's directory.
+        // Restore loose-file lookup before the view starts the game's main scene.
+        if (chdir(content.fileSystemRepresentation) != 0) return nil;
+        return controller;
     }
     std::memset(script_encryption_key,0,32);
     if(pending_script_key) std::memcpy(script_encryption_key,pending_script_key.bytes,32);
@@ -163,6 +167,12 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
     if (!started) {
         [self recordStartupStage:@"Engine setup failed"];
         if (error) *error = [NSError errorWithDomain:@"GodotPlayer" code:2 userInfo:@{NSLocalizedDescriptionKey:@"Godot project initialization failed. Close and reopen the app before trying again. See the game's Saves/player.log in Files."}];
+        return nil;
+    }
+    // apple_embedded_main changes cwd during setup. Main scene loading starts
+    // later, when this controller is attached to the SwiftUI host.
+    if (chdir(content.fileSystemRepresentation) != 0) {
+        if (error) *error = [NSError errorWithDomain:@"GodotPlayer" code:4 userInfo:@{NSLocalizedDescriptionKey:@"The game's companion files folder became unavailable during startup."}];
         return nil;
     }
     // Enable only through startup; restore the game's setting after its first
