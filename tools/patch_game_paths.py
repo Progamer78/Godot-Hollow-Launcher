@@ -9,6 +9,3 @@ def patch(engine):
     os_file = apple / "os_apple_embedded.mm"
     replace(os_file, "String OS_AppleEmbedded::get_resource_dir() const {",
         'String OS_AppleEmbedded::get_resource_dir() const {\n\tconst char *p = getenv("HOLLOW_GAME_FILES");\n\tif (p && *p) return String::utf8(p);')
-    replace(os_file,
-        'return OS_Unix::get_bundle_resource_dir();',
-        'return String::utf8(NSBundle.mainBundle.bundlePath.UTF8String);')

@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#include <unistd.h>
 #import "drivers/apple_embedded/app_delegate_service.h"
 #import "drivers/apple_embedded/godot_view_controller.h"
 extern int HollowRunGodotProof(const char *, const char *, const char *);
@@ -23,7 +24,7 @@ extern const char *HollowGodotProofSavePath(void);
             int result = HollowPrepareGodotGraphics(NSBundle.mainBundle.executablePath.UTF8String,
                 [documents stringByAppendingPathComponent:@"game.pck"].UTF8String,
                 [documents stringByAppendingPathComponent:@"godot.log"].UTF8String);
-            if (result != 0) exit(1);
+            if (result != 0 || chdir(content.fileSystemRepresentation) != 0) exit(1);
             GDTViewController *controller = [GDTViewController new];
             GDTAppDelegateService.viewController = controller;
             self.window.rootViewController = controller;

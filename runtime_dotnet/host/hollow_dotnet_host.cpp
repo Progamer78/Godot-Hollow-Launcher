@@ -11,6 +11,7 @@
 #ifdef APPLE_EMBEDDED_ENABLED
 #include <CoreFoundation/CoreFoundation.h>
 #include <limits.h>
+#include <unistd.h>
 #endif
 
 static String trusted_bundle_root() {
@@ -192,6 +193,7 @@ extern "C" int HollowRunGodotProof(const char *executable, const char *pack, con
 	int result = apple_embedded_main(6, argv);
 	fprintf(stderr, "HOLLOW_GODOT_SETUP: %d\n", result);
 	if (result != 0) return 100 + result;
+	if (const char *content = getenv("HOLLOW_GAME_FILES")) { if (chdir(content) != 0) return -1; }
 	Error phase2 = Main::setup2(false);
 	fprintf(stderr, "HOLLOW_GODOT_SETUP2: %d\n", int(phase2));
 	if (phase2 != OK) return 200 + int(phase2);
