@@ -15,7 +15,7 @@ struct GameFilesManager: View {
                 Text("Folder imports keep the selected folder's name. ZIP imports keep their contents; put data and bin at the ZIP's root.").font(.caption)
             }.disabled(library.importing)
             Section(header: Text("Access in Files")) {
-                Text("On My iPhone â†’ Godot Hollow Launcher â†’ GodotPlayerFiles â†’ \(game.id.uuidString)").font(.caption).textSelection(.enabled)
+                Text("On My iPhone → Godot Hollow Launcher → GodotPlayerFiles → \(game.id.uuidString)").font(.caption).textSelection(.enabled)
                 Text("You can also copy or replace folders there in Files. Fully close Hollow before changing files used by a running game. Native Windows/Android programs and plugins cannot execute on iOS.").font(.caption)
             }
             if library.importing { ProgressView(library.importStatus) }

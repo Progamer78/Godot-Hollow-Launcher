@@ -18,8 +18,9 @@ func _initialize():
             "Main.gd": "extends Node\nfunc _ready():\n    print(\"PLAYER_ENCRYPTED_FOUR_PROOF PASS\")\n    get_tree().quit()\n"
         }
         if mode == "csharp" or mode == "external": files["Game.cs"] = "using Godot; public partial class Game : Node {}"
+        if mode == "external": files["Game.cs"] = " "
         for name in files:
-            assert(packer.add_file_from_buffer("res://" + name, files[name].to_utf8_buffer(), encrypted_files) == OK)
+            assert(packer.add_file_from_buffer("res://" + name, files[name].to_utf8_buffer(), encrypted_files or (mode == "external" and name.ends_with(".cs"))) == OK)
         assert(packer.flush() == OK)
     print("PLAYER_ENCRYPTED_FOUR_FIXTURES PASS")
     quit()

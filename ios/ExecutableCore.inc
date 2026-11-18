@@ -8,11 +8,13 @@ bool candidates(const std::vector<uint8_t> &b, std::vector<std::array<uint8_t, 3
     auto fits = [&](uint64_t at, uint64_t n) { return at <= b.size() && n <= b.size() - at; };
     auto u16 = [&](size_t at) { return uint16_t(b[at]) | uint16_t(b[at+1]) << 8; };
     auto u32 = [&](size_t at) { return uint32_t(b[at]) | uint32_t(b[at+1]) << 8 | uint32_t(b[at+2]) << 16 | uint32_t(b[at+3]) << 24; };
+    auto u64 = [&](size_t at) { return uint64_t(u32(at)) | uint64_t(u32(at+4)) << 32; };
     if (!fits(0, 64) || b.size() > 128*1024*1024 || b[0] != 'M' || b[1] != 'Z') return false;
     uint64_t nt = u32(60);
     if (!fits(nt, 24) || u32(nt) != 0x4550 || u16(nt+4) != 0x8664) return false;
     uint64_t optional = nt+24, count = u16(nt+6), optional_size = u16(nt+20);
     if (count == 0 || count > 96 || optional_size < 112 || !fits(optional, optional_size + count*40) || u16(optional) != 0x20b) return false;
+    const uint64_t image_base = u64(optional+24);
     struct Section { std::string name; uint32_t rva, size, offset; };
     std::vector<Section> sections;
     for (size_t i=0;i<count;i++) {
@@ -58,6 +60,20 @@ bool candidates(const std::vector<uint8_t> &b, std::vector<std::array<uint8_t, 3
     for (auto &f:loaders) for (size_t at=text->offset+f.first-text->rva;at+8<=uint64_t(text->offset)+f.second-text->rva;at++) {
         int64_t rva;
         if(lea(at)) rva=target(at);
+        else if((b[at]==0x48 || b[at]==0x4c) && b[at+1]==0x8b && (b[at+2]&0xc7)==5) {
+            // MinGW exports load the key through .refptr.script_encryption_key:
+            // MOV reg,[RIP+slot], with a relocatable image VA in read-only data.
+            // Follow this single bounded pointer, never scan arbitrary memory.
+            const int64_t slot=target(at); rva=-1;
+            for (const auto &section:sections) {
+                if(section.name!=".rdata" && section.name!=".data") continue;
+                if(slot<section.rva || uint64_t(slot)+8>uint64_t(section.rva)+section.size) continue;
+                const uint64_t address=u64(section.offset+(slot-section.rva));
+                if(address>=image_base && address-image_base<=UINT32_MAX) rva=int64_t(address-image_base);
+                break;
+            }
+            if(rva<0) continue;
+        }
         else if((b[at]==0x66 || b[at]==0xf3) && b[at+1]==0x0f && (b[at+2]==0x6f || b[at+2]==0x10) && (b[at+3]&0xc7)==5)
             rva=int64_t(text->rva)+int64_t(at-text->offset)+8+int32_t(u32(at+4));
         else continue;

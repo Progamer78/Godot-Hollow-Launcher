@@ -58,6 +58,19 @@ class ExecutableTests(unittest.TestCase):
             result=subprocess.run([str(self.exe),str(path),str(0x800)],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
             self.assertIn('expected_location_matches=1',result.stdout)
+    def test_mingw_key_pointer_slot(self):
+        with tempfile.TemporaryDirectory() as d:
+            b=fixture();b[0x600:0x640]=bytes(64)
+            name=b"Can't open encrypted pack directory.\0";b[0x600:0x600+len(name)]=name
+            base=0x140000000;struct.pack_into('<Q',b,0x98+24,base)
+            b[0x420:0x427]=b'\x48\x8b\x0d'+struct.pack('<i',0x2080-0x1027)
+            struct.pack_into('<Q',b,0x680,base+0x3000)
+            path=Path(d)/'mingw.exe';path.write_bytes(b)
+            result=subprocess.run([str(self.exe),str(path),str(0x800)],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn('expected_location_matches=1',result.stdout)
+            struct.pack_into('<Q',b,0x680,base+0x70000000);path.write_bytes(b)
+            self.assertNotEqual(subprocess.run([str(self.exe),str(path),str(0x800)],capture_output=True).returncode,0)
     def test_malformed_and_unsupported_executables(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'bad.exe'

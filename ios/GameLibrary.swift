@@ -56,7 +56,7 @@ enum RuntimeSelection {
         if game.pack.major == 3 && game.pack.minor > 6 { return "This pack needs a newer Godot 3 runtime than 3.6.3." }
         let unbundled = unbundledNativeFiles(for: game)
         if !unbundled.isEmpty, game.allowNativeFallback != true {
-            return "This pack includes native components. Enable â€˜Try without native extensionsâ€™ to attempt offline play. Features that depend on those components will not work."
+            return "This pack includes native components. Enable ‘Try without native extensions’ to attempt offline play. Features that depend on those components will not work."
         }
         return nil
     }
@@ -178,7 +178,7 @@ final class GameLibrary: ObservableObject {
         guard !importing, pendingImport == nil else { return }
         guard manifestUsable else { error = "The library manifest needs recovery before importing."; return }
         importing = true
-        importStatus = "Opening game filesâ€¦"
+        importStatus = "Opening game files…"
         let staging = root.appendingPathComponent("import-\(UUID().uuidString).pck")
         DispatchQueue.global(qos: .userInitiated).async {
             let access = source.startAccessingSecurityScopedResource()
@@ -187,7 +187,8 @@ final class GameLibrary: ObservableObject {
             defer { if companionAccess { companion?.stopAccessingSecurityScopedResource() } }
             let result: Result<(PackInfo, String?, Data?), Error> = Result {
                 if let companion = companion, !companion.isFileURL || companion.pathExtension.lowercased() != "exe" { throw PackError.invalid("The companion must be the original EXE file.") }
-                guard source.isFileURL, PackageImport.extensions.contains(source.pathExtension.lowercased()) else { throw PackError.invalid("Choose a PCK, ZIP, APK, or embedded-PCK EXE.") }
+                let sourceIsFolder = try source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+                guard source.isFileURL, sourceIsFolder || PackageImport.extensions.contains(source.pathExtension.lowercased()) else { throw PackError.invalid("Choose a complete game folder, PCK, ZIP, APK, or embedded-PCK EXE.") }
                 var coordinationError: NSError?
                 var copyError: Error?
                 var note: String?
@@ -196,8 +197,8 @@ final class GameLibrary: ObservableObject {
                 let progress: (String) -> Void = { message in DispatchQueue.main.async { self.importStatus = message } }
                 NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { readable in
                     do {
-                        let values = try readable.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-                        guard values.isRegularFile == true, values.isSymbolicLink != true else { throw PackError.invalid("The selected item is not a regular file.") }
+                        let values = try readable.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey])
+                        guard (values.isRegularFile == true || values.isDirectory == true), values.isSymbolicLink != true else { throw PackError.invalid("The selected item is not a regular file.") }
                         note = try PackageImport.prepare(readable, destination: staging, engineHint: engineHint, progress: progress)
                         if companion == nil && source.pathExtension.lowercased() != "exe" {
                             prepared = try PackageImport.inspectPrepared(staging, source: readable, note: note, existingKey: storedKey, progress: progress)
@@ -236,7 +237,7 @@ final class GameLibrary: ObservableObject {
                         return
                     }
                     defer { try? self.files.removeItem(at: staging) }
-                    try self.install(staging: staging, info: info, note: note, name: source.deletingPathExtension().lastPathComponent, existing: nil, key: key)
+                    try self.install(staging: staging, info: info, note: note, name: PackageImport.extensions.contains(source.pathExtension.lowercased()) ? source.deletingPathExtension().lastPathComponent : source.lastPathComponent, existing: nil, key: key)
                 } catch { try? self.files.removeItem(at: staging); try? self.files.removeItem(at: GameFiles.staging(for: staging)); self.error = "Import failed: \(error.localizedDescription)" }
             }
         }
@@ -289,7 +290,7 @@ final class GameLibrary: ObservableObject {
     func confirmImport() {
         guard !importing, let pending = pendingImport else { return }
         importing = true
-        importStatus = "Backing up saves and replacing gameâ€¦"
+        importStatus = "Backing up saves and replacing game…"
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Result { try self.vault.backup(pending.game.id, label: "Automatic: before game replacement") }
             DispatchQueue.main.async {
@@ -315,7 +316,7 @@ final class GameLibrary: ObservableObject {
 
     func importGameFiles(_ source: URL, for game: Game, folder: Bool) {
         guard !importing, pendingImport == nil, !readOnly else { return }
-        importing = true; importStatus = "Importing companion filesâ€¦"
+        importing = true; importStatus = "Importing companion files…"
         DispatchQueue.global(qos: .userInitiated).async {
             let staging = self.root.appendingPathComponent("content-\(UUID().uuidString)")
             defer { try? self.files.removeItem(at: staging) }

@@ -384,6 +384,15 @@ do {
         let result = try PackageImport.inspectPrepared(copied, source: archive, note: note, allowDotnet: true)
         require(result.pack.requiresDotnet == true && result.key == Data((0..<32).map { UInt8($0) }), "Complete encrypted Windows C# ZIP must import with its actual key and external assembly")
     }
+    let folder = temporary.appendingPathComponent("loose-Windows-game")
+    try FileManager.default.createDirectory(at: folder.appendingPathComponent("data_Game_windows_x86_64"), withIntermediateDirectories: true)
+    try FileManager.default.copyItem(at: original, to: folder.appendingPathComponent("Game.pck"))
+    try FileManager.default.copyItem(at: executable, to: folder.appendingPathComponent("Game.exe"))
+    try FileManager.default.copyItem(at: dll, to: folder.appendingPathComponent("data_Game_windows_x86_64/Game.dll"))
+    let folderPack = temporary.appendingPathComponent("folder-copy.pck")
+    let folderNote = try PackageImport.prepare(folder, destination: folderPack)
+    let folderResult = try PackageImport.inspectPrepared(folderPack, source: folder, note: folderNote, allowDotnet: true)
+    require(folderResult.pack.requiresDotnet == true && folderResult.key == Data((0..<32).map { UInt8($0) }), "Complete folder import must preserve external C# assemblies and recover the original key")
     do {
         _ = try ExecutableImport.recover(executable: executable, pack: original, allowDotnet: true)
         fatalError("Missing external C# assembly accepted")

@@ -26,20 +26,33 @@ enum PackageImport {
     }
     @discardableResult
     static func prepare(_ source: URL, destination: URL, engineHint: UInt32? = nil, progress: ((String) -> Void)? = nil) throws -> String? {
+        if try source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true {
+            let files = try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            let packs = files.filter { $0.pathExtension.lowercased() == "pck" }
+            let executables = files.filter { $0.pathExtension.lowercased() == "exe" && !$0.lastPathComponent.lowercased().contains("console") }
+            guard packs.count == 1 || (packs.isEmpty && executables.count == 1) else { throw PackError.invalid("Select the game folder that directly contains one main PCK or one embedded-PCK EXE, together with its data_ and asset folders.") }
+            let main = packs.first ?? executables[0]
+            let values = try main.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true else { throw PackError.invalid("The game's main file must be a regular file.") }
+            _ = try prepare(main, destination: destination, engineHint: engineHint, progress: progress)
+            progress?("Copying companion folders…")
+            try GameFiles.copyCompanions(from: source, to: GameFiles.staging(for: destination), excluding: [main.lastPathComponent])
+            return "Game folder imported with companion assets. Desktop programs are not executed."
+        }
         switch source.pathExtension.lowercased() {
         case "pck":
             let bytes = try source.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             try checkSpace(destination, bytes: UInt64(max(0, bytes)))
-            progress?("Copying gameÃ¢â‚¬Â¦")
+            progress?("Copying game…")
             try FileManager.default.copyItem(at: source, to: destination); return nil
         case "exe": try embedded(source, destination: destination); return "Original embedded PCK extracted; the executable was not run."
         case "apk", "zip":
-            progress?("Reading archiveÃ¢â‚¬Â¦")
+            progress?("Reading archive…")
             let files = try entries(source)
             let packs = files.filter { !$0.directory && ($0.name as NSString).pathExtension.lowercased() == "pck" && !$0.name.hasSuffix(".sparsepck") }
             if packs.count == 1 {
                 try checkSpace(destination, bytes: packs[0].size)
-                progress?("Extracting gameÃ¢â‚¬Â¦")
+                progress?("Extracting game…")
                 try extract(source, entry: packs[0], destination: destination, limit: 16 << 30)
                 if source.pathExtension.lowercased() == "zip" {
                     let folder = (packs[0].name as NSString).deletingLastPathComponent
@@ -74,7 +87,7 @@ enum PackageImport {
                 try validateSparseIndex(source, index: index, assets: assets, temporary: destination.appendingPathExtension("index"))
             }
             try checkSpace(destination, bytes: assets.reduce(UInt64(0)) { $0 + $1.size } + (assets.map(\.size).max() ?? 0))
-            progress?("Preparing Android assetsÃ¢â‚¬Â¦")
+            progress?("Preparing Android assets…")
             try wrapAssets(source, assets: assets, destination: destination, engineHint: engineHint)
             let libraries = files.filter { $0.name.hasPrefix("lib/") && $0.name.hasSuffix(".so") && !$0.name.contains("libgodot") }.prefix(8).map(\.name)
             return "Original APK asset bytes wrapped in a standalone PCK. Header records the inferred engine family; exact original engine version is unknown. Android plugins and platform-specific textures may prevent execution." + (libraries.isEmpty ? "" : " Ignored Android libraries: \(libraries.joined(separator: ", ")).")
@@ -84,15 +97,23 @@ enum PackageImport {
     // Called while the archive's coordinated/security-scoped read is active.
     // Native EXEs are inspected only for original export keys, never executed.
     static func inspectPrepared(_ pack: URL, source: URL, note: String?, existingKey: Data? = nil, allowDotnet: Bool = DotnetRuntime.bundled, progress: ((String) -> Void)? = nil) throws -> PreparedGame {
-        progress?("Checking game compatibilityÃ¢â‚¬Â¦")
+        progress?("Checking game compatibility…")
+        let directory = try source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
         if let key = existingKey, let info = try? ExecutableImport.inspect(pack, key: key, externalFiles: GameFiles.staging(for: pack), allowDotnet: allowDotnet) {
             return PreparedGame(pack: info, note: note, key: info.needsKey ? key : nil)
         }
         do { return PreparedGame(pack: try PCKInspector.inspect(pack, allowDotnet: allowDotnet, externalAssembly: GameFiles.externalAssembly(in: GameFiles.staging(for: pack))), note: note, key: nil) }
         catch let error as PackError {
-            guard error.recoveryMajor != nil, source.pathExtension.lowercased() == "zip" else { throw error }
+            guard error.recoveryMajor != nil, directory || source.pathExtension.lowercased() == "zip" else { throw error }
         }
-        let files = try entries(source)
+        let files: [ArchiveEntry]
+        if directory {
+            files = try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]).compactMap { url in
+                let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+                guard values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
+                return ArchiveEntry(name: url.lastPathComponent, size: UInt64(max(0, values.fileSize ?? 0)), directory: false, position: 0, index: 0)
+            }
+        } else { files = try entries(source) }
         let packName = files.first { !$0.directory && ($0.name as NSString).pathExtension.lowercased() == "pck" }?.name ?? ""
         let folder = (packName as NSString).deletingLastPathComponent.lowercased()
         let stem = (packName as NSString).deletingPathExtension.lowercased()
@@ -103,24 +124,27 @@ enum PackageImport {
         }
         let candidates = files.filter { !$0.directory && ($0.name as NSString).pathExtension.lowercased() == "exe" && $0.size >= 64 && $0.size <= 128 * 1024 * 1024 }
             .sorted { rank($0) == rank($1) ? $0.name < $1.name : rank($0) < rank($1) }
-        guard !candidates.isEmpty else { throw PackError.invalid("This ZIP contains encrypted Godot data but no supported original Windows x64 EXE (up to 128 MB). Import a ZIP containing the EXE and PCK from the same download, or select both files together.") }
+        guard !candidates.isEmpty else { throw PackError.invalid("This game contains encrypted Godot data but no supported original Windows x64 EXE (up to 128 MB). Import the complete folder or ZIP containing the EXE, PCK and data_ folder from the same download.") }
         let temporary = pack.deletingLastPathComponent().appendingPathComponent("original-\(UUID().uuidString).exe")
         defer { try? FileManager.default.removeItem(at: temporary) }
         for (index, candidate) in candidates.prefix(8).enumerated() {
-            progress?("Checking original runtime \(index + 1) of \(min(8, candidates.count))Ã¢â‚¬Â¦")
-            try checkSpace(temporary, bytes: candidate.size)
-            try extract(source, entry: candidate, destination: temporary, limit: 128 * 1024 * 1024)
+            progress?("Checking original runtime \(index + 1) of \(min(8, candidates.count))…")
+            let executable = directory ? source.appendingPathComponent(candidate.name) : temporary
+            if !directory {
+                try checkSpace(temporary, bytes: candidate.size)
+                try extract(source, entry: candidate, destination: temporary, limit: 128 * 1024 * 1024)
+            }
             do {
-                let recovered = try ExecutableImport.recover(executable: temporary, pack: pack, externalFiles: GameFiles.staging(for: pack), allowDotnet: allowDotnet)
+                let recovered = try ExecutableImport.recover(executable: executable, pack: pack, externalFiles: GameFiles.staging(for: pack), allowDotnet: allowDotnet)
                 if recovered.1 != nil {
-                    return PreparedGame(pack: recovered.0, note: (note.map { $0 + " " } ?? "") + "Original EXE found in ZIP; encrypted directory/scripts validated. Game files are unchanged.", key: recovered.1)
+                    return PreparedGame(pack: recovered.0, note: (note.map { $0 + " " } ?? "") + "Original EXE found; encrypted directory/scripts validated. Game files are unchanged.", key: recovered.1)
                 }
             } catch let error as PackError {
                 if case .unsupportedRuntime = error { throw error }
             } catch { /* Try the next bounded companion. */ }
-            try FileManager.default.removeItem(at: temporary)
+            if !directory { try FileManager.default.removeItem(at: temporary) }
         }
-        throw PackError.invalid("No matching script key was found in this ZIP. Use the original EXE and PCK from the same download. Only recognized Godot 3/4 Windows x64 runtimes are supported; at most eight EXEs are checked.")
+        throw PackError.invalid("No matching script key was found in these game files. Use the original EXE and PCK from the same download. Only recognized Godot 3/4 Windows x64 runtimes are supported; at most eight EXEs are checked.")
     }
     static func checkSpace(_ destination: URL, bytes: UInt64) throws {
         let values = try FileManager.default.attributesOfFileSystem(forPath: destination.deletingLastPathComponent().path)

@@ -70,7 +70,7 @@ struct PlayerRoot: View {
             if !collection.isEmpty && !LibraryQuery.collections(library.games).contains(collection) { collection = "" }
         }
         .onChange(of: phase) { value in if session == nil { UIApplication.shared.isIdleTimerDisabled = library.importing && value == .active } }
-        .fileImporter(isPresented: $picker, allowedContentTypes: [.data, .zip], allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: $picker, allowedContentTypes: [.data, .zip, .folder], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
                 let target = layoutTarget, replacingGame = replacement
@@ -183,7 +183,7 @@ struct PlayerRoot: View {
                 Section {
                     Button { showingHelp = true } label: { Label("Settings & Help", systemImage: "gearshape") }
                 } footer: {
-                    Text("PCK · ZIP · APK · EXE. To switch games, close Hollow from the app switcher and reopen it.")
+                    Text("PCK · ZIP · APK · EXE · Game folder. To switch games, close Hollow from the app switcher and reopen it.")
                 }
             }.listStyle(InsetGroupedListStyle())
             .searchable(text: $search, prompt: "Games or collections")

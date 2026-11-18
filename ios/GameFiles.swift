@@ -41,6 +41,15 @@ enum GameFiles {
             try PackageImport.extract(archive, entry: entry, destination: destination, limit: 4 << 30)
         }
     }
+    static func copyCompanions(from source: URL, to destination: URL, excluding: Set<String>) throws {
+        let files = try SafeFiles.children(source).filter { !excluding.contains($0.1) && (installable($0.1) || managed($0.1)) }
+        try PackageImport.checkSpace(destination, bytes: files.reduce(UInt64(0)) { $0 + UInt64($1.2) })
+        for (file, name, _) in files {
+            let target = destination.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: file, to: target)
+        }
+    }
     // Move only incoming files. Retain unrelated existing assets without making
     // another copy of a multi-gigabyte library; roll back all replacements on error.
     static func merge(_ incoming: URL, into target: URL, commit: () throws -> Void = {}) throws {

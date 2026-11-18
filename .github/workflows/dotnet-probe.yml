@@ -133,7 +133,7 @@ jobs:
         with:
           name: Hollow-Godot-CSharp-game-proof
           path: |
-            build/godot-dotnet-proof/*.json
-            build/godot-dotnet-proof/*.log
-            build/godot-dotnet-proof/*.ips
-            build/godot-dotnet-proof/*.png
+            build/godot-dotnet-proof/**/*.json
+            build/godot-dotnet-proof/**/*.log
+            build/godot-dotnet-proof/**/*.ips
+            build/godot-dotnet-proof/**/*.png
