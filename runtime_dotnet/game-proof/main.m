@@ -37,6 +37,10 @@ extern const char *HollowGodotProofSavePath(void);
                     [[NSJSONSerialization dataWithJSONObject:record options:0 error:nil]
                         writeToFile:[documents stringByAppendingPathComponent:@"native-result.json"] atomically:YES];
                     [timer invalidate];
+                    // End the probe's process after its durable proof record.
+                    // The next assembly layout must start with fresh engine
+                    // globals; avoid waiting for Simulator's graceful shutdown.
+                    _exit(0);
                 }
             }];
             return;

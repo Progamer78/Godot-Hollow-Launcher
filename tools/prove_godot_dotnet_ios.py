@@ -121,7 +121,6 @@ def execute(output, graphics=False):
             cases[mode] = result
             for source in documents.glob('*.log'):shutil.copyfile(source,case / source.name)
             for source in container.rglob('sampler-proof.png'):shutil.copyfile(source,case / source.name)
-            subprocess.run(['xcrun','simctl','terminate',device,'org.godotplayer.dotnetgameproof'],capture_output=True,timeout=30)
         result = {**cases['external'], 'cases': cases}
         (output / 'results.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
         shutil.copyfile(output / 'external/native-result.json', output / 'native-result.json')
