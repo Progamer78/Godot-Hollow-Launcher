@@ -137,7 +137,7 @@ enum PackageImport {
             do {
                 let recovered = try ExecutableImport.recover(executable: executable, pack: pack, externalFiles: GameFiles.staging(for: pack), allowDotnet: allowDotnet)
                 if recovered.1 != nil {
-                    return PreparedGame(pack: recovered.0, note: (note.map { $0 + " " } ?? "") + "Original EXE found; encrypted directory/scripts validated. Game files are unchanged.", key: recovered.1)
+                    return PreparedGame(pack: recovered.0, note: (note.map { $0 + " " } ?? "") + "Original EXE found in \(directory ? "folder" : "ZIP"); encrypted directory/scripts validated. Game files are unchanged.", key: recovered.1)
                 }
             } catch let error as PackError {
                 if case .unsupportedRuntime = error { throw error }
