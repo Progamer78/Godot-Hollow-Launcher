@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 #include <atomic>
 #include <cstring>
+#include <unistd.h>
 #include "core/io/logger.h"
 #import "app_delegate_service.h"
 #import "godot_app_delegate.h"
@@ -113,6 +114,11 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
     player_save_path = [savePath copy];
     [self recordStartupStage:[NSString stringWithFormat:@"Hollow %@; Godot %ld; requested renderer %@; beginning engine setup", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"development", (long)major, renderer]];
     player_orientation = [orientation copy];
+    NSString *content = [[[savePath stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByAppendingPathComponent:[@"GodotPlayerFiles" stringByAppendingPathComponent:savePath.lastPathComponent]];
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:content withIntermediateDirectories:YES attributes:nil error:error] || setenv("HOLLOW_GAME_FILES", content.fileSystemRepresentation, 1) != 0 || chdir(content.fileSystemRepresentation) != 0) {
+        if (error && !*error) *error = [NSError errorWithDomain:@"GodotPlayer" code:4 userInfo:@{NSLocalizedDescriptionKey:@"Could not open the game's companion files folder."}];
+        return nil;
+    }
     if (major == 3) {
         NSString *path = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"Godot3Runtime.framework/Godot3Runtime"];
         void *image = dlopen(path.fileSystemRepresentation, RTLD_NOW | RTLD_LOCAL);

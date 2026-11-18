@@ -70,7 +70,7 @@ int hollow_dotnet_initialize(const char *, const char *, int, const char **, con
 	platform->list_dir_end();
 	String source;
 	Ref<DirAccess> publish = DirAccess::open("res://.godot/mono/publish");
-	ERR_FAIL_COND_V_MSG(publish.is_null(), -1, "Managed publish directory is missing.");
+	if (publish.is_valid()) {
 	publish->list_dir_begin();
 	for (String name = publish->get_next(); !name.is_empty(); name = publish->get_next()) {
 		if (publish->current_is_dir() && FileAccess::exists("res://.godot/mono/publish/" + name + "/" + assembly + ".dll")) {
@@ -78,6 +78,22 @@ int hollow_dotnet_initialize(const char *, const char *, int, const char **, con
 		}
 	}
 	publish->list_dir_end();
+    }
+    if (source.is_empty()) {
+        const String content = OS::get_singleton()->get_resource_dir();
+        Ref<DirAccess> external = DirAccess::open(content);
+        if (external.is_valid()) {
+            external->list_dir_begin();
+            for (String name = external->get_next(); !name.is_empty(); name = external->get_next()) {
+                const String candidate = content.path_join(name);
+                if (external->current_is_dir() && name.begins_with("data_" + assembly + "_") && FileAccess::exists(candidate.path_join(assembly + ".dll"))) {
+                    ERR_FAIL_COND_V_MSG(!source.is_empty(), -1, "Several external managed exports match this game; keep one data_ folder.");
+                    source = candidate;
+                }
+            }
+            external->list_dir_end();
+        }
+    }
 	ERR_FAIL_COND_V_MSG(source.is_empty(), -1, "Main managed assembly is missing from this pack.");
 	// Extracted IL is disposable runtime data, not a game save. Keep it out of
 	// save backups and separate it for each launcher's per-game user directory.

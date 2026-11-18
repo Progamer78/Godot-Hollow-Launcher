@@ -29,7 +29,7 @@ bool candidates(const std::vector<uint8_t> &b, std::vector<std::array<uint8_t, 3
     for (auto &s:sections) {
         if (s.name!=".rdata") continue;
         auto begin=b.begin()+s.offset, end=begin+s.size;
-        for (const char *needle : {"GDScript::load_byte_code", "PackedSourcePCK::try_open_pack"}) {
+        for (const char *needle : {"GDScript::load_byte_code", "PackedSourcePCK::try_open_pack", "Can't open encrypted pack directory."}) {
             size_t length=std::strlen(needle);
             for (auto it=std::search(begin,end,needle,needle+length);it!=end;it=std::search(it+1,end,needle,needle+length)) {
                 anchors.insert(s.rva+uint32_t(it-begin)); if(anchors.size()>32) return false;

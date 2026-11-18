@@ -56,7 +56,7 @@ enum RuntimeSelection {
         if game.pack.major == 3 && game.pack.minor > 6 { return "This pack needs a newer Godot 3 runtime than 3.6.3." }
         let unbundled = unbundledNativeFiles(for: game)
         if !unbundled.isEmpty, game.allowNativeFallback != true {
-            return "This pack includes native components. Enable ‘Try without native extensions’ to attempt offline play. Features that depend on those components will not work."
+            return "This pack includes native components. Enable â€˜Try without native extensionsâ€™ to attempt offline play. Features that depend on those components will not work."
         }
         return nil
     }
@@ -117,6 +117,7 @@ final class GameLibrary: ObservableObject {
 
     func directory(_ id: UUID) -> URL { root.appendingPathComponent("Games/\(id.uuidString)") }
     func packURL(_ game: Game) -> URL { directory(game.id).appendingPathComponent("game.pck") }
+    func gameFilesURL(_ game: Game) -> URL { saves.deletingLastPathComponent().appendingPathComponent("GodotPlayerFiles/\(game.id.uuidString)") }
     func saveURL(_ game: Game) -> URL { saves.appendingPathComponent(game.id.uuidString) }
 
     func persist(_ updated: [Game]) throws {
@@ -157,7 +158,7 @@ final class GameLibrary: ObservableObject {
         do {
             guard manifestUsable else { throw PackError.invalid("Recover the library before removing games.") }
             try files.createDirectory(at: staging, withIntermediateDirectories: true)
-            for (index, original) in [directory(game.id), saveURL(game), root.appendingPathComponent("Backups/\(game.id.uuidString)")].enumerated() where files.fileExists(atPath: original.path) {
+            for (index, original) in [directory(game.id), saveURL(game), gameFilesURL(game), root.appendingPathComponent("Backups/\(game.id.uuidString)")].enumerated() where files.fileExists(atPath: original.path) {
                 let staged = staging.appendingPathComponent(String(index))
                 try files.moveItem(at: original, to: staged)
                 moved.append((original, staged))
@@ -177,7 +178,7 @@ final class GameLibrary: ObservableObject {
         guard !importing, pendingImport == nil else { return }
         guard manifestUsable else { error = "The library manifest needs recovery before importing."; return }
         importing = true
-        importStatus = "Opening game files…"
+        importStatus = "Opening game filesâ€¦"
         let staging = root.appendingPathComponent("import-\(UUID().uuidString).pck")
         DispatchQueue.global(qos: .userInitiated).async {
             let access = source.startAccessingSecurityScopedResource()
@@ -214,7 +215,7 @@ final class GameLibrary: ObservableObject {
                         do {
                             let values = try readable.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
                             guard values.isRegularFile == true, values.isSymbolicLink != true else { throw PackError.invalid("Choose a regular original EXE.") }
-                            recovered = try ExecutableImport.recover(executable: readable, pack: staging)
+                            recovered = try ExecutableImport.recover(executable: readable, pack: staging, externalFiles: GameFiles.staging(for: staging))
                         } catch { recoveryError = error }
                     }
                     if let error = recoveryCoordination { throw error }
@@ -236,12 +237,13 @@ final class GameLibrary: ObservableObject {
                     }
                     defer { try? self.files.removeItem(at: staging) }
                     try self.install(staging: staging, info: info, note: note, name: source.deletingPathExtension().lastPathComponent, existing: nil, key: key)
-                } catch { try? self.files.removeItem(at: staging); self.error = "Import failed: \(error.localizedDescription)" }
+                } catch { try? self.files.removeItem(at: staging); try? self.files.removeItem(at: GameFiles.staging(for: staging)); self.error = "Import failed: \(error.localizedDescription)" }
             }
         }
     }
 
     private func install(staging: URL, info: PackInfo, note: String?, name: String, existing: Game?, key: Data?) throws {
+        defer { try? files.removeItem(at: GameFiles.staging(for: staging)) }
         var game: Game
         if let existing = existing {
             guard let current = games.first(where: { $0.id == existing.id }) else { throw PackError.invalid("The game was removed while importing.") }
@@ -263,7 +265,9 @@ final class GameLibrary: ObservableObject {
         }
         do {
             try storeKey(key, game: game)
-            try self.persist(existing == nil ? self.games + [game] : self.games.map { $0.id == game.id ? game : $0 })
+            try GameFiles.merge(GameFiles.staging(for: staging), into: gameFilesURL(game)) {
+                try self.persist(existing == nil ? self.games + [game] : self.games.map { $0.id == game.id ? game : $0 })
+            }
         } catch {
             try? storeKey(previousKey, game: game)
             if existing != nil, self.files.fileExists(atPath: backup.path) {
@@ -279,17 +283,17 @@ final class GameLibrary: ObservableObject {
 
     func cancelImport() {
         guard !importing else { return }
-        if let pending = pendingImport { try? files.removeItem(at: pending.staging) }
+        if let pending = pendingImport { try? files.removeItem(at: pending.staging); try? files.removeItem(at: GameFiles.staging(for: pending.staging)) }
         pendingImport = nil
     }
     func confirmImport() {
         guard !importing, let pending = pendingImport else { return }
         importing = true
-        importStatus = "Backing up saves and replacing game…"
+        importStatus = "Backing up saves and replacing gameâ€¦"
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Result { try self.vault.backup(pending.game.id, label: "Automatic: before game replacement") }
             DispatchQueue.main.async {
-                defer { self.importing = false; self.importStatus = ""; self.pendingImport = nil; try? self.files.removeItem(at: pending.staging) }
+                defer { self.importing = false; self.importStatus = ""; self.pendingImport = nil; try? self.files.removeItem(at: pending.staging); try? self.files.removeItem(at: GameFiles.staging(for: pending.staging)) }
                 do {
                     _ = try result.get()
                     try self.install(staging: pending.staging, info: pending.pack, note: pending.note, name: pending.game.name, existing: pending.game, key: pending.key)
@@ -300,12 +304,41 @@ final class GameLibrary: ObservableObject {
 
     func prepare(_ game: Game) throws {
         // Reinspect the private copy immediately before native initialization.
-        let info = try ExecutableImport.inspect(packURL(game), key: scriptKey(game))
+        let info = try ExecutableImport.inspect(packURL(game), key: scriptKey(game), externalFiles: gameFilesURL(game))
         var checked = game
         checked.pack = info
         if let reason = RuntimeSelection.problem(for: checked) { throw PackError.invalid(reason) }
+        try files.createDirectory(at: gameFilesURL(game), withIntermediateDirectories: true)
         try files.createDirectory(at: saveURL(game), withIntermediateDirectories: true)
         _ = try vault.backup(game.id, label: "Automatic: before launch")
+    }
+
+    func importGameFiles(_ source: URL, for game: Game, folder: Bool) {
+        guard !importing, pendingImport == nil, !readOnly else { return }
+        importing = true; importStatus = "Importing companion filesâ€¦"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let staging = self.root.appendingPathComponent("content-\(UUID().uuidString)")
+            defer { try? self.files.removeItem(at: staging) }
+            let access = source.startAccessingSecurityScopedResource()
+            defer { if access { source.stopAccessingSecurityScopedResource() } }
+            let result = Result {
+                var coordinationError: NSError?, readError: Error?
+                NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { readable in
+                    do {
+                        if folder {
+                            guard GameFiles.safe(readable.lastPathComponent) else { throw PackError.invalid("Unsafe folder name.") }
+                            _ = try SafeFiles.copyTree(readable, to: staging.appendingPathComponent(readable.lastPathComponent))
+                        } else { try GameFiles.extract(readable, entries: PackageImport.entries(readable), prefix: "", to: staging) }
+                        try GameFiles.merge(staging, into: self.gameFilesURL(game))
+                    } catch { readError = error }
+                }
+                if let error = coordinationError { throw error }; if let error = readError { throw error }
+            }
+            DispatchQueue.main.async {
+                self.importing = false; self.importStatus = ""
+                switch result { case .success: self.notice = "Game Files imported. Their original folder layout was kept."; case .failure(let error): self.error = error.localizedDescription }
+            }
+        }
     }
 
     var vault: SaveVault { SaveVault(root: root.appendingPathComponent("Backups"), saves: saves) }

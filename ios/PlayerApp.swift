@@ -271,6 +271,7 @@ struct PlayerRoot: View {
                 Text("Safe Launch uses OpenGL, a 30 FPS cap, hidden virtual controls and disabled controller remapping for this session. It cannot supply missing classes or unsupported encryption.").font(.caption)
             }
             Section(header: Text("Saves & support")) {
+                NavigationLink("Game Files & Companion Folders", destination: GameFilesManager(game: game))
                 NavigationLink("Saves, Backups & Transfers", destination: SaveManager(game: game))
                 NavigationLink("Storage & Shader Cache", destination: StorageManager(game: game))
                 Button("Export Support Report") {

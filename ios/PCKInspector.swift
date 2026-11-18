@@ -52,7 +52,7 @@ enum PackError: LocalizedError {
 // Implements PackedSourcePCK::try_open_pack in the pinned official engine.
 // Inspect only the header and directory; game assets are never extracted.
 enum PCKInspector {
-    static func inspect(_ url: URL, decryptScript: ((Data) throws -> Data)? = nil, decryptBlock: ((Data, Bool) throws -> Data)? = nil, allowDotnet: Bool = DotnetRuntime.bundled) throws -> PackInfo {
+    static func inspect(_ url: URL, decryptScript: ((Data) throws -> Data)? = nil, decryptBlock: ((Data, Bool) throws -> Data)? = nil, allowDotnet: Bool = DotnetRuntime.bundled, externalAssembly: Bool = false) throws -> PackInfo {
         let file = try PackReader(url)
         var reader = file
         let packSize = file.size
@@ -201,7 +201,7 @@ enum PCKInspector {
             guard major == 4 && allowDotnet else {
                 throw PackError.unsupportedRuntime("This game requires C#/.NET (\(example)). Its managed runtime is not included in this build of Hollow. Windows .NET DLLs cannot be launched by the bundled GDScript runtime.")
             }
-            guard hasManagedAssembly else { throw PackError.invalid("This C# project has no compiled game assembly in its Godot publish directory. Import the complete exported game PCK.") }
+            guard hasManagedAssembly || externalAssembly else { throw PackError.invalid("This C# export keeps its compiled game assembly outside the PCK. Import the complete game ZIP including its data_ folder, or use a complete Android APK.") }
         }
         return PackInfo(format: format, major: major, minor: minor, patch: patch, fileCount: count, byteCount: packSize, nativeFiles: nativeFiles.isEmpty ? nil : nativeFiles, scriptVersions: versions.isEmpty ? nil : versions.sorted(), encryptedScriptCount: encryptedScripts == 0 ? nil : encryptedScripts, encryptedFileCount: encryptedFiles.isEmpty ? nil : encryptedFiles.count, encryptedDirectory: flags & 1 != 0, requiresDotnet: dotnetExample == nil ? nil : true)
     }

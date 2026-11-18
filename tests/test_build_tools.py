@@ -253,7 +253,7 @@ class BuildToolsTests(unittest.TestCase):
     def test_patch_matches_official_release(self):
         names = [
             "drivers/apple_embedded/app.swift", "drivers/apple_embedded/app_delegate_service.mm",
-            "drivers/apple_embedded/os_apple_embedded.mm", "drivers/apple_embedded/bridging_header_apple_embedded.h",
+            "drivers/apple_embedded/os_apple_embedded.mm", "drivers/apple_embedded/os_apple_embedded.h", "drivers/apple_embedded/bridging_header_apple_embedded.h",
             "core/extension/gdextension.cpp", "platform_methods.py",
             "drivers/apple_embedded/godot_view_renderer.mm",
             "drivers/apple_embedded/godot_view_controller.mm",
@@ -338,7 +338,7 @@ class BuildToolsTests(unittest.TestCase):
             renderer = (target / "drivers/apple_embedded/godot_view_renderer.mm").read_text()
             self.assertIn("!player_main_started || !OS::get_singleton()->get_main_loop()", renderer)
             self.assertIn("[PlayerRuntime launchFailureMessage]", renderer)
-            self.assertIn("Native game extensions are disabled", (target / names[4]).read_text())
+            self.assertIn("Native game extensions are disabled", (target / "core/extension/gdextension.cpp").read_text())
             display = (target / "drivers/apple_embedded/display_server_apple_embedded.h").read_text()
             self.assertEqual(display.count('#include "player_mouse_display.inc"'), 1)
             self.assertIn('#include "core/input/input.h"', display)

@@ -223,6 +223,33 @@ do {
 print("Native archives, APK assets, embedded PCKs, save backup/restore/transfer/retention and analog/control presets passed")
 
 do {
+    let incoming = temporary.appendingPathComponent("incoming-assets")
+    let content = temporary.appendingPathComponent("game-assets")
+    try FileManager.default.createDirectory(at: incoming.appendingPathComponent("data/maps"), withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: content.appendingPathComponent("data/maps"), withIntermediateDirectories: true)
+    try Data("old map".utf8).write(to: content.appendingPathComponent("data/maps/level.cfg"))
+    try Data("keep".utf8).write(to: content.appendingPathComponent("unrelated.txt"))
+    try Data("new map".utf8).write(to: incoming.appendingPathComponent("data/maps/level.cfg"))
+    try Data("new file".utf8).write(to: incoming.appendingPathComponent("added.txt"))
+    do {
+        try GameFiles.merge(incoming, into: content) { throw PackError.invalid("Simulated manifest failure") }
+        fatalError("Failed companion import did not roll back")
+    } catch {}
+    let restoredMap = try String(contentsOf: content.appendingPathComponent("data/maps/level.cfg"), encoding: .utf8)
+    require(restoredMap == "old map" && !FileManager.default.fileExists(atPath: content.appendingPathComponent("added.txt").path), "Asset replacement rolls back together when commit fails")
+    try Data("new map".utf8).write(to: incoming.appendingPathComponent("data/maps/level.cfg"))
+    try GameFiles.merge(incoming, into: content)
+    let newMap = try String(contentsOf: content.appendingPathComponent("data/maps/level.cfg"), encoding: .utf8)
+    require(newMap == "new map" && FileManager.default.fileExists(atPath: content.appendingPathComponent("unrelated.txt").path), "Companion updates preserve unrelated files and folder layout")
+    require(!GameFiles.safe("../outside") && !GameFiles.safe("/absolute") && !GameFiles.safe("data\\escape"), "Companion paths reject traversal and absolute paths")
+    require(!GameFiles.installable("bin/windows/ffmpeg.exe") && GameFiles.installable("data/maps/song.ogg"), "Asset imports retain data without installing desktop programs")
+    require(reopened.gameFilesURL(reopened.games[0]) != reopened.saveURL(reopened.games[0]), "Companion assets and saves use separate roots")
+    var gestures = TouchGestures(); gestures.enabled = true; gestures.twoFingerDrag = true; gestures.twoFingerDoubleTap = "Mouse Right"
+    let decoded = try JSONDecoder().decode(TouchGestures.self, from: JSONEncoder().encode(gestures))
+    require(decoded.twoFingerDrag == true && decoded.twoFingerDoubleTap == "Mouse Right", "Drag and double-tap choices persist")
+}
+
+do {
     let folder=URL(fileURLWithPath:"build/archive-tests")
     let pack=folder.appendingPathComponent("encrypted-fixture.pck")
     let recovered=try ExecutableImport.recover(executable:folder.appendingPathComponent("original-fixture.exe"),pack:pack)

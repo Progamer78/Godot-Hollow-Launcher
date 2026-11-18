@@ -30,27 +30,51 @@ enum PackageImport {
         case "pck":
             let bytes = try source.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             try checkSpace(destination, bytes: UInt64(max(0, bytes)))
-            progress?("Copying game…")
+            progress?("Copying gameâ€¦")
             try FileManager.default.copyItem(at: source, to: destination); return nil
         case "exe": try embedded(source, destination: destination); return "Original embedded PCK extracted; the executable was not run."
         case "apk", "zip":
-            progress?("Reading archive…")
+            progress?("Reading archiveâ€¦")
             let files = try entries(source)
             let packs = files.filter { !$0.directory && ($0.name as NSString).pathExtension.lowercased() == "pck" && !$0.name.hasSuffix(".sparsepck") }
             if packs.count == 1 {
                 try checkSpace(destination, bytes: packs[0].size)
-                progress?("Extracting game…")
+                progress?("Extracting gameâ€¦")
                 try extract(source, entry: packs[0], destination: destination, limit: 16 << 30)
-                return "Original PCK extracted from \(source.pathExtension.uppercased()). Desktop/Android native libraries are not imported."
+                if source.pathExtension.lowercased() == "zip" {
+                    let folder = (packs[0].name as NSString).deletingLastPathComponent
+                    try GameFiles.extract(source, entries: files, prefix: folder.isEmpty ? "" : folder + "/", to: GameFiles.staging(for: destination), excluding: [packs[0].name])
+                }
+                return "Original PCK extracted from \(source.pathExtension.uppercased()). ZIP companion assets are preserved; native libraries are not executed."
+            }
+            if packs.isEmpty && source.pathExtension.lowercased() == "zip" {
+                let executables = files.filter { !$0.directory && $0.name.lowercased().hasSuffix(".exe") && !$0.name.lowercased().contains("console") }
+                let temp = destination.appendingPathExtension("exe")
+                defer { try? FileManager.default.removeItem(at: temp) }
+                for candidate in executables.prefix(8) {
+                    do {
+                        try checkSpace(destination, bytes: candidate.size)
+                        try extract(source, entry: candidate, destination: temp, limit: 4 << 30)
+                        try embedded(temp, destination: destination)
+                        let folder = (candidate.name as NSString).deletingLastPathComponent
+                        try GameFiles.extract(source, entries: files, prefix: folder.isEmpty ? "" : folder + "/", to: GameFiles.staging(for: destination))
+                        return "Embedded PCK and companion assets imported. Windows programs are not executed."
+                    } catch { try? FileManager.default.removeItem(at: destination); try? FileManager.default.removeItem(at: temp) }
+                }
+                throw PackError.invalid("No standalone PCK or supported embedded-PCK EXE found in this ZIP.")
             }
             if packs.count > 1 { throw PackError.invalid("This archive contains several PCKs: \(packs.prefix(6).map(\.name).joined(separator: ", ")). Extract and import the desired complete PCK.") }
-            if files.contains(where: { $0.name.hasSuffix(".sparsepck") }) { throw PackError.invalid("This APK uses a sparse or encrypted asset layout. Import a complete standalone PCK; its required external data or export key is not available here.") }
-            let assets = files.filter { !$0.directory && $0.name.hasPrefix("assets/") && $0.name != "assets/_cl_" }
+            // Godot 4.7 APKs carry an index beside the actual loose assets.
+            // Wrap those assets, not the index; inspection still validates the project and scripts.
+            let assets = files.filter { !$0.directory && $0.name.hasPrefix("assets/") && $0.name != "assets/_cl_" && !$0.name.hasSuffix(".sparsepck") }
             guard assets.contains(where: { ["assets/project.binary", "assets/project.godot"].contains($0.name) }) else {
                 throw PackError.invalid("No complete Godot game found. Split APKs, asset-delivery downloads and non-Godot APKs are unsupported. Choose a standalone PCK or full Godot APK.")
             }
+            if let index = files.first(where: { $0.name == "assets/assets.sparsepck" }) {
+                try validateSparseIndex(source, index: index, assets: assets, temporary: destination.appendingPathExtension("index"))
+            }
             try checkSpace(destination, bytes: assets.reduce(UInt64(0)) { $0 + $1.size } + (assets.map(\.size).max() ?? 0))
-            progress?("Preparing Android assets…")
+            progress?("Preparing Android assetsâ€¦")
             try wrapAssets(source, assets: assets, destination: destination, engineHint: engineHint)
             let libraries = files.filter { $0.name.hasPrefix("lib/") && $0.name.hasSuffix(".so") && !$0.name.contains("libgodot") }.prefix(8).map(\.name)
             return "Original APK asset bytes wrapped in a standalone PCK. Header records the inferred engine family; exact original engine version is unknown. Android plugins and platform-specific textures may prevent execution." + (libraries.isEmpty ? "" : " Ignored Android libraries: \(libraries.joined(separator: ", ")).")
@@ -58,14 +82,13 @@ enum PackageImport {
         }
     }
     // Called while the archive's coordinated/security-scoped read is active.
-    // Only the selected PCK and bounded candidate EXEs are extracted. Windows
-    // code and unrelated archive files are never installed or executed.
+    // Native EXEs are inspected only for original export keys, never executed.
     static func inspectPrepared(_ pack: URL, source: URL, note: String?, existingKey: Data? = nil, progress: ((String) -> Void)? = nil) throws -> PreparedGame {
-        progress?("Checking game compatibility…")
-        if let key = existingKey, let info = try? ExecutableImport.inspect(pack, key: key) {
+        progress?("Checking game compatibilityâ€¦")
+        if let key = existingKey, let info = try? ExecutableImport.inspect(pack, key: key, externalFiles: GameFiles.staging(for: pack)) {
             return PreparedGame(pack: info, note: note, key: info.needsKey ? key : nil)
         }
-        do { return PreparedGame(pack: try PCKInspector.inspect(pack), note: note, key: nil) }
+        do { return PreparedGame(pack: try PCKInspector.inspect(pack, externalAssembly: GameFiles.externalAssembly(in: GameFiles.staging(for: pack))), note: note, key: nil) }
         catch let error as PackError {
             guard error.recoveryMajor != nil, source.pathExtension.lowercased() == "zip" else { throw error }
         }
@@ -84,11 +107,11 @@ enum PackageImport {
         let temporary = pack.deletingLastPathComponent().appendingPathComponent("original-\(UUID().uuidString).exe")
         defer { try? FileManager.default.removeItem(at: temporary) }
         for (index, candidate) in candidates.prefix(8).enumerated() {
-            progress?("Checking original runtime \(index + 1) of \(min(8, candidates.count))…")
+            progress?("Checking original runtime \(index + 1) of \(min(8, candidates.count))â€¦")
             try checkSpace(temporary, bytes: candidate.size)
             try extract(source, entry: candidate, destination: temporary, limit: 128 * 1024 * 1024)
             do {
-                let recovered = try ExecutableImport.recover(executable: temporary, pack: pack)
+                let recovered = try ExecutableImport.recover(executable: temporary, pack: pack, externalFiles: GameFiles.staging(for: pack))
                 if recovered.1 != nil {
                     return PreparedGame(pack: recovered.0, note: (note.map { $0 + " " } ?? "") + "Original EXE found in ZIP; encrypted directory/scripts validated. Game files are unchanged.", key: recovered.1)
                 }
@@ -99,7 +122,7 @@ enum PackageImport {
         }
         throw PackError.invalid("No matching script key was found in this ZIP. Use the original EXE and PCK from the same download. Only recognized Godot 3/4 Windows x64 runtimes are supported; at most eight EXEs are checked.")
     }
-    private static func checkSpace(_ destination: URL, bytes: UInt64) throws {
+    static func checkSpace(_ destination: URL, bytes: UInt64) throws {
         let values = try FileManager.default.attributesOfFileSystem(forPath: destination.deletingLastPathComponent().path)
         if let free = values[.systemFreeSize] as? NSNumber, bytes > free.uint64Value || free.uint64Value - bytes < 32 * 1024 * 1024 {
             throw PackError.invalid("Not enough free storage to import this game. Free up space and try again; the original download is unchanged.")
@@ -107,6 +130,40 @@ enum PackageImport {
     }
     static func extract(_ archive: URL, entry: ArchiveEntry, destination: URL, limit: UInt64) throws {
         try GPArchive.extract(archive.path, entry: entry.name, destination: destination.path, limit: limit, position: entry.position, index: entry.index)
+    }
+    private static func validateSparseIndex(_ source: URL, index: ArchiveEntry, assets: [ArchiveEntry], temporary: URL) throws {
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try extract(source, entry: index, destination: temporary, limit: 64 * 1024 * 1024)
+        let data = try Data(contentsOf: temporary)
+        var cursor = 0
+        func number(_ bytes: Int) throws -> UInt64 {
+            guard cursor <= data.count, bytes <= data.count - cursor else { throw PackError.invalid("Truncated APK asset index.") }
+            defer { cursor += bytes }
+            return data[cursor..<cursor + bytes].enumerated().reduce(UInt64(0)) { $0 | UInt64($1.element) << (8 * $1.offset) }
+        }
+        guard try number(4) == 0x43504447 else { throw PackError.invalid("Invalid APK asset index.") }
+        let format = try number(4)
+        guard [3, 4].contains(format), data.count >= 104 else { throw PackError.invalid("Unsupported APK asset index format.") }
+        cursor = 20
+        let flags = try number(4)
+        guard flags & 4 != 0, flags & ~UInt64(6) == 0 else { throw PackError.invalid("This APK has an encrypted or unsupported asset index. Use its complete desktop ZIP instead.") }
+        _ = try number(8)
+        let directory = try number(8)
+        guard directory >= 104, directory <= UInt64(data.count) else { throw PackError.invalid("Invalid APK index directory offset.") }
+        cursor = Int(directory)
+        let count = try number(4)
+        guard count > 0, count <= 100000 else { throw PackError.invalid("Oversized APK asset index.") }
+        let available = Dictionary(uniqueKeysWithValues: assets.map { (String($0.name.dropFirst(7)), $0.size) })
+        for _ in 0..<count {
+            let length = try number(4)
+            guard length > 0, length <= 16384, length <= UInt64(data.count - cursor) else { throw PackError.invalid("Invalid APK index path.") }
+            let bytes = data[cursor..<cursor + Int(length)].prefix { $0 != 0 }; cursor += Int(length)
+            guard let raw = String(data: bytes, encoding: .utf8) else { throw PackError.invalid("Invalid APK index path encoding.") }
+            let path = raw.hasPrefix("res://") ? String(raw.dropFirst(6)) : raw
+            _ = try number(8); let size = try number(8)
+            _ = try number(8); _ = try number(8)
+            guard try number(4) == 0, available[path] == size else { throw PackError.invalid("This APK is missing a complete, unencrypted asset: \(path). Use the full download rather than a split APK.") }
+        }
     }
     static func copy(_ input: FileHandle, to output: FileHandle, bytes: UInt64) throws {
         var remaining = bytes

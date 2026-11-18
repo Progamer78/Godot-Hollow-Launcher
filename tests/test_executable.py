@@ -49,6 +49,15 @@ class ExecutableTests(unittest.TestCase):
             result=subprocess.run([str(self.exe),str(path),str(0x680)],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
             self.assertIn('expected_location_matches=1',result.stdout)
+    def test_stripped_function_names_use_encrypted_directory_diagnostic(self):
+        with tempfile.TemporaryDirectory() as d:
+            b=fixture();b[0x600:0x640]=bytes(64)
+            name=b"Can't open encrypted pack directory.\0"
+            b[0x600:0x600+len(name)]=name
+            path=Path(d)/'stripped.exe';path.write_bytes(b)
+            result=subprocess.run([str(self.exe),str(path),str(0x800)],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn('expected_location_matches=1',result.stdout)
     def test_malformed_and_unsupported_executables(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'bad.exe'

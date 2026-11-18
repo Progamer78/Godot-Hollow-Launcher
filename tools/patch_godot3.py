@@ -71,6 +71,8 @@ def patch(engine):
     # choose the project; no Info.plist path can redirect it to a dummy project.
     bootstrap = ios / "godot_iphone.mm"
     replace(bootstrap, '\targc = add_path(argc, fargv);\n\targc = add_cmdline(argc, fargv);', '\t// Explicit player arguments only.')
+    replace(ios / "os_iphone.h", "String get_user_data_dir() const;",
+        'String get_user_data_dir() const;\n\tvirtual String get_resource_dir() const { const char *p = getenv("HOLLOW_GAME_FILES"); return p && *p ? String::utf8(p) : OS_Unix::get_resource_dir(); }\n\tvirtual String get_executable_path() const { const char *p = getenv("HOLLOW_GAME_FILES"); return p && *p ? String::utf8(p).plus_file("game") : OS_Unix::get_executable_path(); }')
     os_file = ios / "os_iphone.mm"
     replace(os_file, 'void OSIPhone::joy_button(int p_device, int p_button, bool p_pressed) {', 'extern bool gp3_should_filter_controller();\nvoid OSIPhone::joy_button(int p_device, int p_button, bool p_pressed) {\n\tif (gp3_should_filter_controller()) return;')
     replace(os_file, 'void OSIPhone::joy_axis(int p_device, int p_axis, float p_value) {', 'void OSIPhone::joy_axis(int p_device, int p_axis, float p_value) {\n\tif (gp3_should_filter_controller()) return;')
