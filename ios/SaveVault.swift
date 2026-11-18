@@ -1,5 +1,13 @@
 import Foundation
 
+enum SaveTextFormat {
+    static func json(_ text: String) throws -> String {
+        let object = try JSONSerialization.jsonObject(with: Data(text.utf8), options: .fragmentsAllowed)
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed])
+        return String(decoding: data, as: UTF8.self)
+    }
+}
+
 struct SaveSnapshot: Codable, Identifiable {
     let id: UUID
     let created: Date
@@ -132,5 +140,20 @@ final class SaveVault {
         let bytes = try input.read(upToCount: 256 * 1024 + 1) ?? Data()
         guard bytes.count <= 256 * 1024, let text = String(data: bytes, encoding: .utf8) else { throw PackError.invalid("This save is too large or is not UTF-8 text.") }
         return text
+    }
+    func edit(_ id: UUID, name: String, original: String, text: String) throws {
+        let data = Data(text.utf8)
+        guard data.count <= 256 * 1024 else { throw PackError.invalid("Save editing supports text files up to 256 KB.") }
+        guard try preview(id, name: name) == original else { throw PackError.invalid("This save changed after you opened it. Reopen the file before editing so newer progress is not overwritten.") }
+        if (name as NSString).pathExtension.lowercased() == "json" {
+            do { _ = try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) }
+            catch { throw PackError.invalid("This is not valid JSON. Check quotes, commas and brackets before saving. The original file is unchanged.") }
+        }
+        _ = try backup(id, label: "Automatic: before save edit")
+        guard try preview(id, name: name) == original,
+              let file = try SafeFiles.children(saveRoot(id)).first(where: { $0.1 == name }) else {
+            throw PackError.invalid("This save changed while it was being backed up. Reopen it before editing.")
+        }
+        try data.write(to: file.0, options: .atomic)
     }
 }

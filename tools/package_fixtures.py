@@ -33,6 +33,14 @@ if __name__=='__main__':
     spec=importlib.util.spec_from_file_location('exe_fixture',Path(__file__).resolve().parents[1]/'tests/test_executable.py')
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     (output/'original-fixture.exe').write_bytes(module.fixture())
+    original4=module.fixture()
+    original4[0x600:0x640]=bytes(64)
+    anchor=b"Can't open encrypted pack directory.\0"
+    original4[0x600:0x600+len(anchor)]=anchor
+    struct.pack_into('<Q', original4, 0x98 + 24, 0x140000000)
+    original4[0x420:0x427] = b'\x48\x8b\x0d' + struct.pack('<i', 0x2080 - 0x1027)
+    struct.pack_into('<Q', original4, 0x680, 0x140003000)
+    (output/'original4-fixture.exe').write_bytes(original4)
     encrypted=base64.b64decode('R0RFQwEAAAARnnc/7CJArt7Q9wRTTsAaDAAAAAAAAACQ/7fMiwOnJmMloYFnmBpl')
     payloads=[('res://project.godot',b'config_version=4\n'),('res://proof.gde',encrypted)]
     header=b'GDPC'+struct.pack('<IIII',1,3,6,3)+bytes(64)

@@ -9,6 +9,9 @@ var stats_resource
 var tools
 var checks = 0
 var typed_codes = []
+var search_fixture = []
+var search_dictionary = {}
+var bool_fixture = []
 
 func _input(event):
     if event is InputEventKey and event.pressed:
@@ -41,6 +44,10 @@ func edit(suffix, value):
 func run_checks():
     tools = ClassDB.call("instantiate", "PlayerTools")
     check(tools != null, "native tools class exists in release template")
+    var performance = tools.request({"action": "status"})
+    check(performance.ok and performance.fps >= 0 and performance.frameMs >= 0, "performance HUD has numeric FPS and frame interval")
+    check(performance.processMs >= 0 and performance.physicsMs >= 0 and performance.engineMemoryBytes >= 0, "performance monitors return nonnegative runtime measurements")
+    check((performance.fps == 0 and performance.frameMs == 0) or abs(performance.fps * performance.frameMs - 1000.0) < 0.01, "frame interval is consistent with observed FPS")
     stats_resource = load("res://Stats.gd").new()
     edit(".money", "999")
     check(money == 999, "script integer changed")
@@ -103,6 +110,10 @@ func run_checks():
     candidates = tools.request({"action": "refine_numbers", "comparison": "increased"})
     check(candidates.rows.size() == 1 and candidates.rows[0].value == "51", "numeric search narrows by increase")
     check(tools.request({"action": "freeze", "target": candidates.rows[0], "value": "60"}).ok, "freeze initial edit succeeds")
+    check(tools.request({"action":"read","target":candidates.rows[0]}).rows[0].frozen, "live reads report an active freeze")
+    check(tools.request({"action":"scan","search":candidates.rows[0].label}).rows[0].frozen, "stat scans identify frozen variables")
+    var active_freezes = tools.request({"action":"freezes"})
+    check(active_freezes.ok and active_freezes.rows.size() == 1 and active_freezes.rows[0].value == "60", "active freeze list reports the held value")
     money = 1
     tools.request({"action": "tick"})
     check(money == 60, "freeze tick restores desired value")
@@ -115,10 +126,44 @@ func run_checks():
         if not tools.request({"action":"freeze","target":candidates.rows[0],"value":"70"}).ok:
             reused_freeze_slot = false
     check(reused_freeze_slot, "editing a pinned freeze reuses its slot instead of hitting the 20-freeze limit")
+    var rescanned_target = tools.request({"action":"scan","search":candidates.rows[0].label}).rows[0]
+    check(tools.request({"action":"freeze","target":rescanned_target,"value":"70"}).ok and tools.request({"action":"freezes"}).rows.size() == 1, "fresh scan freeze reuses the existing slot on both engines")
+    check(tools.request({"action":"unfreeze","target":rescanned_target}).ok and tools.request({"action":"freezes"}).rows.size() == 0, "individual unfreeze resolves a fresh scan's path")
+    money = 4
+    tools.request({"action":"tick"})
+    check(money == 4 and not tools.request({"action":"read","target":candidates.rows[0]}).rows[0].frozen, "released variable no longer reports frozen or receives writes")
+    tools.request({"action":"freeze","target":candidates.rows[0],"value":"70"})
+    money = "type changed"
+    check(tools.request({"action":"freezes"}).rows.size() == 0, "stale freezes disappear when the variable changes type")
     tools.request({"action": "clear_freezes"})
     money = 2
     tools.request({"action": "tick"})
     check(money == 2, "cleared freeze stops writing")
+    player_flag = false
+    var boolean_search = tools.request({"action":"find_numbers","kind":"bool","comparison":"exact","value":"false","search":"player_flag"})
+    check(boolean_search.ok and boolean_search.rows.size() == 1 and boolean_search.rows[0].type == "bool", "boolean search matches false and a variable-name filter")
+    player_flag = true
+    boolean_search = tools.request({"action":"refine_numbers","kind":"bool","comparison":"changed","search":"PLAYER_FLAG"})
+    check(boolean_search.ok and boolean_search.rows.size() == 1 and boolean_search.rows[0].value == "true", "boolean search narrows changed values with case-insensitive names")
+    check(tools.request({"action":"edit","target":boolean_search.rows[0],"value":"false"}).ok and player_flag == false, "boolean search results can be edited")
+    boolean_search = tools.request({"action":"refine_numbers","kind":"bool","comparison":"unchanged"})
+    check(boolean_search.rows.size() == 0, "boolean unchanged comparison drops edited values")
+    check(not tools.request({"action":"find_numbers","kind":"bool","comparison":"increased"}).ok, "boolean search rejects numeric-only comparisons")
+    money = 55
+    var named_numbers = tools.request({"action":"find_numbers","comparison":"any","search":"money"})
+    var names_match = named_numbers.rows.size() > 0
+    for match_row in named_numbers.rows:
+        names_match = names_match and match_row.label.to_lower().find("money") >= 0
+    check(names_match, "numeric search applies variable names before the candidate limit")
+    named_numbers = tools.request({"action":"refine_numbers","comparison":"any","search":"stats_resource.money"})
+    check(named_numbers.rows.size() == 1 and named_numbers.rows[0].label.find("stats_resource.money") >= 0, "existing numeric candidates can be narrowed by variable path")
+    check(not tools.request({"action":"find_numbers","comparison":"exact","value":"not a number"}).ok, "invalid numeric exact searches are refused")
+    var monitor_target = target(".player_flag")
+    var monitored = tools.request({"action":"read","target":monitor_target})
+    check(monitored.ok and monitored.rows[0].value == "false", "pinned monitor reads booleans without editing them")
+    player_flag = true
+    monitored = tools.request({"action":"read","target":monitor_target})
+    check(monitored.ok and monitored.rows[0].value == "true", "cached pinned target returns the current live value")
     var fps_property = "max_fps" if Engine.get_version_info().major >= 4 else "target_fps"
     var previous_fps = Engine.get(fps_property)
     check(tools.request({"action": "options", "fps": 30}).ok and Engine.get(fps_property) == 30, "frame cap changes actual engine setting")
@@ -151,5 +196,183 @@ func run_checks():
     check(typed_codes.size() >= 3 and typed_codes[typed_codes.size() - 3] == 65 and typed_codes[typed_codes.size() - 2] == 233 and typed_codes[typed_codes.size() - 1] == 128578, "scene receives full Unicode text key events")
     var objects = tools.request({"action": "objects"})
     check(objects.ok and objects.rows.size() >= 2, "browser lists real scene objects")
+    # Read-only refresh and separate panels must not move the comparison baseline.
+    money = 80
+    var persistent = complete_search({"action":"find_numbers","kind":"number","comparison":"exact","value":"80","search":"ToolsProof.money"})
+    check(persistent.candidateCount == 1, "combined name/type/value search")
+    money = 81
+    var refreshed = tools.request({"action":"search_results"})
+    check(refreshed.rows[0].value == "81" and refreshed.rows[0].previous == "80" and refreshed.searchSteps == 0, "refresh retains comparison baseline")
+    tools.request({"action":"scene_tree"})
+    tools.request({"action":"capture_activity"})
+    persistent = complete_search({"action":"refine_numbers","kind":"any","comparison":"changed","search":"MONEY"})
+    check(persistent.candidateCount == 1 and persistent.rows[0].value == "81", "other panels never consume changed search")
+    var restored = tools.request({"action":"undo_search"})
+    check(restored.candidateCount == 1 and restored.rows[0].previous == "80" and restored.searchSteps == 0, "undo restores previous candidate baseline")
+    check(not tools.request({"action":"find_numbers","kind":"number","comparison":"exact","value":"bad"}).ok and tools.request({"action":"search_results"}).candidateCount == 1, "invalid search preserves existing candidates")
+    player_flag = false
+    var any_search = complete_search({"action":"find_numbers","kind":"any","comparison":"any","search":"player_"})
+    check(any_search.candidateCount == 2, "one search includes booleans and text together")
+    player_flag = true
+    any_search = complete_search({"action":"refine_numbers","kind":"bool","comparison":"changed","search":"flag"})
+    check(any_search.candidateCount == 1 and any_search.rows[0].value == "true", "name type and changed filters combine")
+    var text_search = complete_search({"action":"find_numbers","kind":"string","comparison":"exact","value":player_name,"search":"player_name"})
+    check(text_search.candidateCount == 1, "text exact search")
+    var text_before = player_name
+    player_name = "New screen"
+    text_search = complete_search({"action":"refine_numbers","kind":"string","comparison":"changed"})
+    check(text_search.candidateCount == 1 and text_search.rows[0].value == player_name, "text changed search")
+    var activity = tools.request({"action":"compare_activity"})
+    check(activity.ok and activity.changedCount >= 2, "scene change snapshot catches boolean and text changes independently")
+    var scene = tools.request({"action":"scene_tree","search":"ToolsProof"})
+    check(scene.ok and scene.nodes.size() >= 1 and scene.currentScene.scriptPath.ends_with("Main.gd"), "scene inspector reports actual script and scene paths")
+    var button = Button.new()
+    button.name = "InspectButton"
+    add_child(button)
+    button.connect("pressed", Callable(self, "test_signal"))
+    var detail = tools.request({"action":"scene_node","object":str(button.get_instance_id())})
+    var has_connection = false
+    for connection in detail.actions:
+        has_connection = has_connection or (connection.signal == "pressed" and connection.method == "test_signal" and connection.targetObject == str(get_instance_id()))
+    check(detail.ok and has_connection, "scene inspector resolves real connected signal targets")
+    var scoped = complete_search({"action":"find_numbers","kind":"any","comparison":"any","scope":str(button.get_instance_id())})
+    check(scoped.candidateCount == 0, "node scoped search excludes other nodes and globals")
+    check(not tools.request({"action":"refine_numbers","scope":""}).ok, "scope change requires explicit new search")
+    button.free()
+    # More than twenty pages, and beyond both previous array/candidate limits.
+    for i in range(2505): search_fixture.append(i)
+    var pending = tools.request({"action":"find_numbers","kind":"number","comparison":"any","search":"search_fixture"})
+    check(pending.ok and pending.searching, "large search yields instead of blocking for whole traversal")
+    check(not tools.request({"action":"find_numbers","comparison":"any"}).ok, "concurrent discovery is refused without corrupting current work")
+    tools.request({"action":"cancel_search"})
+    check(tools.request({"action":"search_results"}).candidateCount == 0, "cancel keeps previous completed scoped search")
+    var paged = complete_search({"action":"find_numbers","kind":"number","comparison":"any","search":"search_fixture"})
+    check(paged.candidateCount == 2505 and paged.pageCount == 26 and not paged.truncated, "search retains every candidate beyond old 150 and 2000 limits")
+    var first_label = paged.rows[0].label
+    var second_page = tools.request({"action":"search_results","page":1})
+    check(second_page.rows.size() == 100 and second_page.rows[0].label != first_label, "pages expose distinct candidates without truncating pool")
+    var last_page = tools.request({"action":"search_results","page":999})
+    check(last_page.page == 25 and last_page.rows.size() == 5, "page bounds clamp safely")
+    search_fixture[2000] = -10
+    paged = complete_search({"action":"refine_numbers","kind":"number","comparison":"decreased","search":"search_fixture"})
+    check(paged.candidateCount == 1 and paged.rows[0].label.ends_with("[2000]"), "narrowing checks offscreen candidates across all pages")
+    var undone = tools.request({"action":"undo_search"})
+    check(undone.candidateCount == 2505 and undone.searchSteps == 0, "undo restores complete paged candidate pool")
+    search_fixture.clear()
+    var wire_start = wire_request({"action":"find_numbers","kind":"bool","comparison":"any","search":"player_flag"})
+    while wire_start.searching: wire_start = wire_request({"action":"continue_search"})
+    player_flag = false
+    var wire_refresh = wire_request({"action":"search_results"})
+    check(wire_refresh.candidateCount == 1 and wire_refresh.rows[0].previous == "true" and wire_refresh.rows[0].value == "false", "JSON session survives separate requests with baseline intact")
+    var wire_narrow = wire_request({"action":"refine_numbers","kind":"bool","comparison":"changed"})
+    while wire_narrow.searching: wire_narrow = wire_request({"action":"continue_search"})
+    check(wire_narrow.candidateCount == 1, "JSON session supports changed narrowing after read-only refresh")
+    for i in range(200000): search_fixture.append(i)
+    var old_wire = wire_request({"action":"search_results"})
+    var preview = wire_request({"action":"find_numbers","kind":"number","comparison":"any","search":"ToolsProof.money"})
+    check(preview.searching and preview.searchDiscovery and preview.rows.size() == 1 and preview.rows[0].label.ends_with(".money"), "named variable appears in the first batch before unrelated large arrays finish")
+    var progress = wire_request({"action":"continue_search","progressOnly":true})
+    check(progress.searching and not progress.has("rows"), "progress-only batches skip row resolution and JSON payloads")
+    var money_before_preview = money
+    check(wire_request({"action":"edit","target":preview.rows[0],"value":"1231"}).ok and money == 1231, "preview matches can be edited while discovery continues")
+    var still_preview = wire_request({"action":"search_results"})
+    check(still_preview.rows[0].previous == str(money_before_preview) and still_preview.rows[0].value == "1231", "preview reads retain their original comparison baseline")
+    var cancelled_preview = wire_request({"action":"cancel_search"})
+    check(cancelled_preview.candidateCount == old_wire.candidateCount and cancelled_preview.rows[0].label == old_wire.rows[0].label, "cancelling preview restores the previous completed pool")
+    money = money_before_preview
+    var named_timing = benchmark_search({"action":"find_numbers","kind":"number","comparison":"any","search":"ToolsProof.money"}, "named variable with unrelated 200000-entry array")
+    check(named_timing.candidateCount == 1, "fast preview still finishes an exhaustive named search")
+    var full_timing = benchmark_search({"action":"find_numbers","kind":"number","comparison":"any","search":"search_fixture"}, "200000 candidates through JSON transport")
+    check(full_timing.candidateCount == 200000 and full_timing.pageCount == 2000 and not full_timing.truncated, "progress-only transport retains every candidate and all pages")
+    check(full_timing.indexedLocations < 100 and full_timing.indexRecordsBytes < 20000000, "200000 entries share compact path records rather than full per-row dictionaries")
+    var fresh_batch = wire_request({"action":"refine_numbers","kind":"number","comparison":"any"})
+    search_fixture = search_fixture.duplicate()
+    search_fixture[199000] = -3
+    while fresh_batch.searching: fresh_batch = wire_request({"action":"continue_search","progressOnly":true})
+    var late_page = wire_request({"action":"search_results","page":1990})
+    check(late_page.rows[0].label.ends_with("[199000]") and late_page.rows[0].previous == "-3", "container cache expires between batches when the game replaces an array")
+    search_fixture[199000] = -4
+    var narrow_timing = benchmark_search({"action":"refine_numbers","kind":"number","comparison":"decreased"}, "narrow 200000 candidates through JSON transport")
+    check(narrow_timing.candidateCount == 1 and narrow_timing.rows[0].label.ends_with("[199000]"), "optimized narrowing still checks offscreen candidates")
+    search_fixture.clear()
+    var undo_large = wire_request({"action":"undo_search"})
+    check(undo_large.candidateCount == 200000, "large-pool undo restores all indexed candidates")
+    for i in range(300): search_dictionary["entry_" + str(i)] = i
+    search_dictionary[9223372036854775807] = 77
+    search_dictionary[Vector2(1, 2)] = 4
+    var dictionary_search = complete_search({"action":"find_numbers","kind":"number","comparison":"any","search":"search_dictionary"})
+    check(dictionary_search.candidateCount == 301 and not dictionary_search.truncated, "dictionary continuation visits all keys beyond the chunk size and skips unsupported keys")
+    var dictionary_last = tools.request({"action":"search_results","page":3})
+    check(dictionary_last.rows[0].label.ends_with(".9223372036854775807"), "compact index preserves full-width integer dictionary keys")
+    check(tools.request({"action":"edit","target":dictionary_last.rows[0],"value":"88"}).ok and search_dictionary[9223372036854775807] == 88, "indexed dictionary targets remain editable")
+    search_dictionary.clear()
+    for i in range(200000): search_dictionary["entry_" + str(i)] = i
+    var dict_timing = benchmark_search({"action":"find_numbers","kind":"number","comparison":"any","search":"search_dictionary"}, "200000 dictionary entries through JSON transport")
+    check(dict_timing.candidateCount == 200000 and not dict_timing.truncated, "large dictionary search covers all 200000 entries")
+    check(dict_timing.indexedLocations < 100 and dict_timing.indexRecordsBytes < 20000000, "large dictionary entries also share compact paths and labels")
+    search_dictionary["entry_199000"] = -1
+    var dict_narrow = benchmark_search({"action":"refine_numbers","kind":"number","comparison":"decreased"}, "narrow 200000 dictionary entries through JSON transport")
+    check(dict_narrow.candidateCount == 1 and dict_narrow.rows[0].label.ends_with(".entry_199000"), "large dictionary narrowing finds a late changed key")
+    search_dictionary.clear()
+    check(dict_narrow.searchTypes == ["number"], "pool type metadata describes actual matches")
+    # Whole-game false searches must include large containers without a name filter.
+    player_flag = false
+    bool_fixture = [false, true, 0, 1, "false", "true", {"nested":false}]
+    for i in range(200000): search_fixture.append(false)
+    var all_false = benchmark_search({"action":"find_numbers","kind":"bool","comparison":"exact","value":"false"}, "whole game 200000 false booleans without a name filter")
+    check(all_false.candidateCount == 200003 and not all_false.truncated and all_false.searchTypes == ["bool"], "whole-game false search finds scalar, nested and all 200000 array flags")
+    var actual_false_rows = true
+    for false_row in all_false.rows:
+        actual_false_rows = actual_false_rows and false_row.type == "bool" and false_row.value.to_lower() == "false"
+    check(actual_false_rows, "whole-game false results contain actual booleans")
+    search_fixture[199000] = true
+    var bool_changed = benchmark_search({"action":"refine_numbers","kind":"bool","comparison":"changed"}, "narrow 200003 booleans to a changed offscreen flag")
+    check(bool_changed.candidateCount == 1 and bool_changed.rows[0].label.ends_with("[199000]") and bool_changed.rows[0].value.to_lower() == "true", "boolean narrowing checks every page and finds a late false-to-true change")
+    var bool_undo = wire_request({"action":"undo_search"})
+    check(bool_undo.candidateCount == 200003 and bool_undo.searchTypes == ["bool"], "undo restores the full boolean pool and type metadata")
+    var bool_partial = wire_request({"action":"find_numbers","kind":"number","comparison":"any"})
+    check(bool_partial.searching, "whole-game replacement search yields with a large boolean container")
+    var bool_cancelled = wire_request({"action":"cancel_search"})
+    check(bool_cancelled.candidateCount == 200003 and bool_cancelled.searchTypes == ["bool"], "cancelling replacement preserves boolean pool type metadata")
+    search_fixture.clear()
+    var nested_false = complete_search({"action":"find_numbers","kind":"bool","comparison":"exact","value":"FALSE","search":"bool_fixture"})
+    check(nested_false.candidateCount == 2 and nested_false.searchTypes == ["bool"], "boolean false search includes nested flags and excludes zero and text false")
+    var any_false = complete_search({"action":"find_numbers","kind":"any","comparison":"exact","value":"false","search":"bool_fixture"})
+    check(any_false.candidateCount == 3 and any_false.searchTypes.has("bool") and any_false.searchTypes.has("string") and not any_false.searchTypes.has("number"), "Any exact false includes boolean and literal text but not numeric zero")
+    var numeric_flags = complete_search({"action":"find_numbers","kind":"any","comparison":"exact","value":"0","search":"bool_fixture"})
+    check(numeric_flags.candidateCount == 1 and numeric_flags.searchTypes == ["number"], "numeric zero flags remain discoverable with actual type metadata even for Any searches")
+    var mixed_flags = complete_search({"action":"find_numbers","kind":"any","comparison":"any","search":"bool_fixture"})
+    check(mixed_flags.candidateCount == 7 and mixed_flags.searchTypes.size() == 3, "mixed container advertises all candidate types")
+    var narrowed_false = complete_search({"action":"refine_numbers","kind":"bool","comparison":"exact","value":"false"})
+    check(narrowed_false.candidateCount == 2 and narrowed_false.searchTypes == ["bool"], "Boolean false narrowing works from a mixed candidate pool")
+    var mixed_undo = tools.request({"action":"undo_search"})
+    check(mixed_undo.candidateCount == 7 and mixed_undo.searchTypes.size() == 3, "undo restores mixed type availability")
     print("PLAYER_TOOLS_PROOF PASS checks=", checks)
     get_tree().quit()
+
+func complete_search(command):
+    var reply = tools.request(command)
+    var batches = 0
+    while reply.ok and reply.get("searching", false) and batches < 2000:
+        reply = tools.request({"action":"continue_search"})
+        batches += 1
+    check(reply.ok and not reply.get("searching", false), "batched search completes")
+    return reply
+
+func wire_request(command):
+    return JSON.parse_string(tools.transport(JSON.stringify(command)))
+
+func test_signal():
+    pass
+
+func benchmark_search(command, label):
+    var began = Time.get_ticks_usec()
+    var reply = wire_request(command)
+    var first_us = Time.get_ticks_usec() - began
+    var batches = 1
+    while reply.ok and reply.get("searching", false) and batches < 2000:
+        reply = wire_request({"action":"continue_search","progressOnly":true})
+        batches += 1
+    check(reply.ok and not reply.get("searching", false), "benchmark search completes")
+    print("PLAYER_SEARCH_TIMING " + JSON.stringify({"case":label,"native_ms":float(Time.get_ticks_usec() - began) / 1000.0,"first_batch_ms":float(first_us) / 1000.0,"batches":batches,"examined":reply.examined,"indexed_locations":reply.indexedLocations,"index_records_bytes":reply.indexRecordsBytes,"old_timer_wait_floor_ms":(batches - 1) * 200}))
+    return reply

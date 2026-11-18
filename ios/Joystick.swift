@@ -29,18 +29,20 @@ struct JoystickEditor: View {
                             Text("Left stick").tag(0); Text("Right stick").tag(2)
                         }
                     }
-                    Button("Use arrow keys") { joystick.up = "Up"; joystick.down = "Down"; joystick.left = "Left"; joystick.right = "Right" }
-                    Button("Use WASD") { joystick.up = "W"; joystick.down = "S"; joystick.left = "A"; joystick.right = "D" }
-                    keyPicker("Up", key: $joystick.up)
-                    keyPicker("Down", key: $joystick.down)
-                    keyPicker("Left", key: $joystick.left)
-                    keyPicker("Right", key: $joystick.right)
+                    if joystick.output != "gamepad" {
+                        Button("Use arrow keys") { joystick.up = "Up"; joystick.down = "Down"; joystick.left = "Left"; joystick.right = "Right" }
+                        Button("Use WASD") { joystick.up = "W"; joystick.down = "S"; joystick.left = "A"; joystick.right = "D" }
+                        keyPicker("Up", key: $joystick.up)
+                        keyPicker("Down", key: $joystick.down)
+                        keyPicker("Left", key: $joystick.left)
+                        keyPicker("Right", key: $joystick.right)
+                    }
                 }
                 Section(header: Text("Feel")) {
                     Text("Size: \(Int(joystick.diameter))")
-                    Slider(value: $joystick.diameter, in: 90...220, step: 2)
+                    Slider(value: $joystick.diameter, in: 90...220, step: 2).accessibilityLabel("Joystick size")
                     Text("Deadzone: \(Int(joystick.deadzone * 100))%")
-                    Slider(value: $joystick.deadzone, in: 0.08...0.5, step: 0.01)
+                    Slider(value: $joystick.deadzone, in: 0.08...0.5, step: 0.01).accessibilityLabel("Joystick deadzone")
                 }
                 Button("Remove Joystick", action: onDelete).foregroundColor(.red)
             }
@@ -54,7 +56,9 @@ struct JoystickEditor: View {
     private func keyPicker(_ title: String, key: Binding<String>) -> some View {
         VStack(alignment:.leading) {
             Picker(title, selection: key) { ForEach(ControlKeys.all.contains(key.wrappedValue) ? ControlKeys.all : [key.wrappedValue]+ControlKeys.all, id: \.self) { Text($0).tag($0) } }
-            TextField("Custom key for \(title.lowercased())",text:key).autocapitalization(.none).disableAutocorrection(true)
+            DisclosureGroup("Custom key name") {
+                TextField("Custom key for \(title.lowercased())",text:key).autocapitalization(.none).disableAutocorrection(true)
+            }.font(.caption)
         }
     }
 }

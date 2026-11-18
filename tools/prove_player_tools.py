@@ -35,6 +35,8 @@ def prove(editor, runtime, major, adjacent=False):
             (project / "Main.tscn").write_text('[gd_scene load_steps=2 format=2]\n[ext_resource path="res://Main.gd" type="Script" id=1]\n[node name="ToolsProof" type="Node"]\nscript = ExtResource( 1 )\n')
             script = (project / "Main.gd").read_text()
             script = script.replace('ClassDB.call("instantiate",', 'ClassDB.call("instance",')
+            script = script.replace('button.connect("pressed", Callable(self, "test_signal"))', 'button.connect("pressed", self, "test_signal")')
+            script = script.replace("Time.get_ticks_usec()", "OS.get_ticks_usec()")
             script = script.replace("JSON.parse_string", "parse_json_wire").replace("JSON.stringify", "write_json_wire")
             script += '\nfunc parse_json_wire(text):\n    return JSON.parse(text).result\n\nfunc write_json_wire(value):\n    return JSON.print(value)\n'
             (project / "Main.gd").write_text(script)
@@ -63,7 +65,8 @@ def prove(editor, runtime, major, adjacent=False):
                 text = run(runtime, ["--main-pack", pack], empty, "run")
         match = re.search(r"PLAYER_TOOLS_PROOF PASS checks=(\d+)", text)
         if not match: raise RuntimeError("Compiled native tools did not execute the checks")
-        result = {"engine_major": major, "checks_passed": int(match[1]), "runtime": "locally compiled official release plus PlayerTools", "result": "passed", "ios_ui": "not tested"}
+        timings = [json.loads(line.split("PLAYER_SEARCH_TIMING ", 1)[1]) for line in text.splitlines() if line.startswith("PLAYER_SEARCH_TIMING ")]
+        result = {"search_timings": timings, "engine_major": major, "checks_passed": int(match[1]), "runtime": "locally compiled official release plus PlayerTools", "result": "passed", "ios_ui": "not tested"}
         (output / "results.json").write_text(json.dumps(result, indent=2) + "\n")
         print(json.dumps(result, indent=2))
 

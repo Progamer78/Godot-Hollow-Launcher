@@ -127,7 +127,7 @@ do {
     fatalError("Unsupported Godot 4 encrypted scripts accepted")
 } catch {
     let reason = error.localizedDescription
-    precondition(reason.contains("Godot 4") && reason.contains("unencrypted export") && !reason.contains("EXE together with the PCK"), "Unsupported encryption must not suggest Godot 3 EXE recovery")
+    precondition(reason.contains("Godot 4") && reason.contains("unencrypted export") && reason.contains("EXE together with the PCK"), "Godot 4 encryption must suggest its own EXE recovery without using the legacy decrypter")
 }
 checks += 1
 let good = fixture()

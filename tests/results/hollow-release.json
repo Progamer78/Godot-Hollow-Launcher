@@ -1,0 +1,53 @@
+{
+  "date": "2026-11-11",
+  "desktop_tools": {
+    "godot3": 94,
+    "godot4": 94,
+    "passed": true
+  },
+  "helper_tests": {
+    "passed": 25,
+    "skipped": 0
+  },
+  "swift_syntax_files": 27,
+  "direct_redeclarations": [],
+  "workflow_shell_blocks": 18,
+  "ios_ci": {
+    "run": "https://github.com/Progamer78/Godot-Hollow-Launcher/actions/runs/43149671399",
+    "status": "passed",
+    "verified": [
+      "270 PCK inspector checks",
+      "Swift model suite with ZIP/AES and save editing",
+      "iPhone complete Swift type-check",
+      "iPhone archive importer compile/link",
+      "UIKit input simulator checks",
+      "Godot 3 iPhone framework compilation/link/isolation audit",
+      "Godot 4 iPhone runtime and launcher compilation",
+      "Xcode archive",
+      "unsigned IPA packaging, ARM64/framework audits in CI and after download",
+      "Godot 3 capitalized boolean pin migration"
+    ],
+    "simulator_scope": "Recorded engine endpoints, actual UIKit views; no Godot game execution or physical touch injection",
+    "source_commit": "12c6d132c3c1f1cef99c2043a9e778df81a09476",
+    "unsigned_ipa_produced": true,
+    "ipa_sha256": "30ccf456f2f2673376d29888008bd1a147cab30478706c618da69b10114588e5"
+  },
+  "device": "not tested this update",
+  "cache_benchmark": {
+    "cold_run": 43146270113,
+    "warm_run": 43149671399,
+    "cold_job_seconds": 751,
+    "warm_job_seconds": 338,
+    "cold_engine_seconds": [
+      173,
+      308
+    ],
+    "warm_engine_seconds": [
+      19,
+      30
+    ],
+    "retrieved_targets": 4101,
+    "scope": "One observed pair on macos-latest; warm run includes final Swift UI changes, cold runs remain necessary when no compatible cache exists"
+  },
+  "signing": "unsigned; personal identity required for app and embedded framework"
+}
