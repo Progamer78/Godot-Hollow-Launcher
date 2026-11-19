@@ -10,9 +10,10 @@ enum PlayerRuntime {
     static var cursorPolls = 0
     static var cursorPositionReads = 0
     static var cursorVisibilityReads = 0
+    static var mouseEvents: [(Int, Bool)] = []
     static func setKey(_ key: String, pressed: Bool) { keyEvents.append((key, pressed)) }
     static func releaseKeys() {}
-    static func setMouseButton(_ button: Int, pressed: Bool) {}
+    static func setMouseButton(_ button: Int, pressed: Bool) { mouseEvents.append((button, pressed)) }
     static func scrollMouse(_ direction: Int) {}
     static func mouseCaptured() -> Bool { false }
     static func mouseCursorRevision() -> UInt { cursorPolls += 1; return 1 }
@@ -23,6 +24,16 @@ enum PlayerRuntime {
     static func moveMouse(_ point: CGPoint, from view: UIView, relative: Bool) {}
 }
 struct SmokeReply { let ok: Bool }
+
+// Feed touch positions through the real UIView event handlers. This does not
+// inject system gestures; it exercises the multi-finger state and releases.
+final class SmokeTouch: UITouch {
+    var point = CGPoint.zero
+    var state = UITouch.Phase.began
+    override func location(in view: UIView?) -> CGPoint { point }
+    override var phase: UITouch.Phase { state }
+    override var timestamp: TimeInterval { 1 }
+}
 enum ToolsBridge {
     static var textChunks: [String] = []
     static var commands: [[String: Any]] = []
@@ -102,6 +113,30 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
         record("PLAYER_INPUT_UI_CHECK: joystick, keyboard, Unicode and release PASS")
         let mouse = MouseTouchView(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
         root.addSubview(mouse)
+        var dragProfile = TouchGestures(); dragProfile.enabled = true; dragProfile.twoFingerDrag = true
+        for button in ["left", "right"] {
+            dragProfile.twoFingerDragButton = button
+            let number = button == "right" ? 2 : 1
+            for end in ["primary", "secondary", "cancel", "profile"] {
+                mouse.configureGestures(dragProfile)
+                PlayerRuntime.mouseEvents = []
+                let primary = SmokeTouch(), secondary = SmokeTouch()
+                secondary.point = CGPoint(x: 40, y: 40)
+                mouse.touchesBegan([primary], with: nil)
+                mouse.touchesBegan([secondary], with: nil)
+                secondary.state = .moved; secondary.point.y += 20
+                mouse.touchesMoved([secondary], with: nil)
+                if end == "primary" { primary.state = .ended; mouse.touchesEnded([primary], with: nil) }
+                else if end == "secondary" { secondary.state = .ended; mouse.touchesEnded([secondary], with: nil) }
+                else if end == "cancel" { primary.state = .cancelled; mouse.touchesCancelled([primary], with: nil) }
+                else { var changed = dragProfile; changed.twoFingerDragButton = button == "left" ? "right" : "left"; mouse.configureGestures(changed) }
+                mouse.cancelTouch()
+                check(PlayerRuntime.mouseEvents.count == 2 && PlayerRuntime.mouseEvents[0].0 == number && PlayerRuntime.mouseEvents[0].1 && PlayerRuntime.mouseEvents[1].0 == number && !PlayerRuntime.mouseEvents[1].1,
+                      "\(button) drag must press/release its own button on \(end)")
+            }
+        }
+        mouse.configureGestures(TouchGestures())
+        record("PLAYER_INPUT_UI_CHECK: left/right two-finger drag and cancellation PASS")
         // Exercise the same updater used by the display-link callback directly.
         // Headless CI does not guarantee a rendered frame within a wall-clock
         // interval; lack of that frame is not evidence of a cursor crash.

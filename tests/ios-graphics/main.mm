@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <OpenGLES/EAGL.h>
 #import <OpenGLES/ES3/gl.h>
+#import "../../ios/player_save_paths.h"
 
 @interface HollowBaselineGL : CAEAGLLayer
 - (void)initializeDisplayLayer;
@@ -45,14 +46,30 @@
         glViewport(0, 0, 128, 128); glClearColor(0, 1, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
         GLubyte pixel[4] = {}; glReadPixels(8, 8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
         BOOL rendered = pixel[0] == 0 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255;
+        NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        NSString *save = [documents stringByAppendingPathComponent:@"SaveDirectoryProof"];
+        [NSFileManager.defaultManager createDirectoryAtPath:save withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *existing = [save stringByAppendingPathComponent:@"save.json"];
+        [@"existing game save" writeToFile:existing atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        NSString *gameLog = [save stringByAppendingPathComponent:@"logs/modloader.log"];
+        BOOL missingLogs = ![NSFileManager.defaultManager createFileAtPath:gameLog contents:[NSData data] attributes:nil];
+        NSError *saveError = nil;
+        BOOL prepared = HollowPrepareSaveDirectory(save, &saveError) && !saveError &&
+            [@"independent game log" writeToFile:gameLog atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        BOOL preserved = HollowPrepareSaveDirectory(save, &saveError) &&
+            [[NSString stringWithContentsOfFile:existing encoding:NSUTF8StringEncoding error:nil] isEqualToString:@"existing game save"] &&
+            [[NSString stringWithContentsOfFile:gameLog encoding:NSUTF8StringEncoding error:nil] isEqualToString:@"independent game log"];
+        NSError *conflict = nil;
+        BOOL reportsError = !HollowPrepareSaveDirectory(existing, &conflict) && conflict != nil;
         NSDictionary *result = @{
-            @"passed": @(reproduced && context && framebuffer && compiled && rendered && varyings > 0),
+            @"passed": @(reproduced && context && framebuffer && compiled && rendered && varyings > 0 && missingLogs && prepared && preserved && reportsError),
             @"unpatched_override_failure_reproduced": @(reproduced), @"opengl_context": @(context),
             @"framebuffer": @(framebuffer), @"vertex_shader_compiled": @(compiled == GL_TRUE),
             @"rendered_green_pixel": @(rendered), @"varyings": @(varyings), @"version": version,
+            @"missing_game_log_directory_reproduced": @(missingLogs), @"game_log_directory_prepared": @(prepared),
+            @"existing_save_preserved": @(preserved), @"save_directory_error_reported": @(reportsError),
             @"scope": @"Original iOS OpenGL layer on iPhone Simulator with saved Forward+ setting; full game untested"
         };
-        NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
         [[NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:nil]
             writeToFile:[documents stringByAppendingPathComponent:@"graphics-result.json"] atomically:YES];
     });

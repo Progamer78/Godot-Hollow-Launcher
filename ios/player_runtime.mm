@@ -1,5 +1,6 @@
 #import "PlayerRuntime.h"
 #import "Godot3API.h"
+#import "player_save_paths.h"
 #include <dlfcn.h>
 #include <atomic>
 #include <cstring>
@@ -100,6 +101,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
         if (error) *error = [NSError errorWithDomain:@"GodotPlayer" code:1 userInfo:@{NSLocalizedDescriptionKey:reason}];
         return nil;
     }
+    if (!HollowPrepareSaveDirectory(savePath, error)) return nil;
     attempted = YES;
     // Independent of Godot's buffered logger: survives a hang in setup2 or
     // scene loading. Keep the preceding attempt when retrying Safe Launch.

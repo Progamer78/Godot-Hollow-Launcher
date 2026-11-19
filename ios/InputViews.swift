@@ -112,7 +112,7 @@ final class MouseTouchView: UIView {
     var sensitivity: CGFloat = 1
     private var last = CGPoint.zero
     private var distance: CGFloat = 0
-    private var heldLeft = false
+    private var heldButton: Int?
     private var tracking = false
     private var primaryTouch: UITouch?
     private var secondTouch: UITouch?
@@ -190,8 +190,8 @@ final class MouseTouchView: UIView {
     }
     func stop() { cancelTouch(); displayLink?.invalidate(); displayLink = nil }
     @objc func cancelTouch() {
-        if heldLeft { PlayerRuntime.setMouseButton(1, pressed: false) }
-        heldLeft = false
+        if let button = heldButton { PlayerRuntime.setMouseButton(button, pressed: false) }
+        heldButton = nil
         dragActive = false
         tracking = false
         primaryTouch = nil; secondTouch = nil
@@ -235,7 +235,7 @@ final class MouseTouchView: UIView {
         if mode == "direct" && !PlayerRuntime.mouseCaptured() {
             PlayerRuntime.moveMouse(last, from: self, relative: false)
             PlayerRuntime.setMouseButton(1, pressed: true)
-            heldLeft = true
+            heldButton = 1
         }
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -249,8 +249,8 @@ final class MouseTouchView: UIView {
                 let point = second.location(in: self)
                 let delta = CGPoint(x: point.x - dragOrigin.x, y: point.y - dragOrigin.y)
                 if !dragActive && hypot(point.x - secondOrigin.x, point.y - secondOrigin.y) >= 6 {
-                    dragActive = true; heldLeft = true
-                    PlayerRuntime.setMouseButton(1, pressed: true)
+                    dragActive = true; heldButton = gestureProfile.dragMouseButton
+                    PlayerRuntime.setMouseButton(gestureProfile.dragMouseButton, pressed: true)
                 }
                 if dragActive { PlayerRuntime.moveMouse(CGPoint(x: delta.x * sensitivity, y: delta.y * sensitivity), from: self, relative: true) }
                 dragOrigin = point
@@ -268,8 +268,8 @@ final class MouseTouchView: UIView {
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         if dragEnabled, let second = secondTouch, touches.contains(second) {
-            if heldLeft { PlayerRuntime.setMouseButton(1, pressed: false) }
-            heldLeft = false; dragActive = false; secondTouch = nil
+            if let button = heldButton { PlayerRuntime.setMouseButton(button, pressed: false) }
+            heldButton = nil; dragActive = false; secondTouch = nil
             distance = max(8, distance)
         }
         if secondFingerEnabled, let second = secondTouch, touches.contains(second) {
@@ -284,7 +284,7 @@ final class MouseTouchView: UIView {
         }
         guard let primary = primaryTouch, touches.contains(primary) else { return }
         guard tracking else { return }
-        if !heldLeft && distance < 8 {
+        if heldButton == nil && distance < 8 {
             PlayerRuntime.setMouseButton(1, pressed: true)
             PlayerRuntime.setMouseButton(1, pressed: false)
         }

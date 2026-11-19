@@ -488,6 +488,12 @@ do {
     require(gestures.secondFingerButton == 1, "Second-finger left click is supported")
     gestures.secondFingerClick = "unknown"; gestures.constrain()
     require(gestures.secondFingerButton == nil, "Unknown second-finger modes normalize to off")
+    require(gestures.dragMouseButton == 1, "Existing drag profiles default to left click")
+    gestures.twoFingerDrag = true; gestures.twoFingerDragButton = "right"
+    let rightDrag = try JSONDecoder().decode(TouchGestures.self, from: JSONEncoder().encode(gestures))
+    require(rightDrag.dragMouseButton == 2 && rightDrag.twoFingerDrag == true, "Right-button drag choice persists")
+    gestures.twoFingerDragButton = "unknown"; gestures.constrain()
+    require(gestures.twoFingerDragButton == nil && gestures.dragMouseButton == 1, "Invalid drag buttons normalize to left click")
     let status = try JSONDecoder().decode(ToolReply.self, from: Data("{\"ok\":true,\"fps\":60,\"frameMs\":16.6667,\"processMs\":2,\"physicsMs\":1,\"engineMemoryBytes\":1048576}".utf8))
     require(status.fps == 60 && status.engineMemoryBytes == 1_048_576 && status.processMs == 2, "Performance HUD decodes typed runtime metrics")
     let oldPin = try JSONDecoder().decode(SavedCheat.self, from: Data("{\"id\":\"00000000-0000-0000-0000-000000000001\",\"name\":\"Money\",\"label\":\"/root/Game.money\",\"type\":\"int\",\"value\":\"99\"}".utf8))

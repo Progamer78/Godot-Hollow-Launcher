@@ -192,13 +192,16 @@ struct TouchGestures: Codable, Equatable {
     var threeFingerTap="Escape"
     var scroll=true
     var twoFingerDrag: Bool?
+    var twoFingerDragButton: String?
     var twoFingerDoubleTap: String?
     var secondFingerClick: String?
     var secondFingerButton: Int? { secondFingerClick == "left" ? 1 : (secondFingerClick == "right" ? 2 : nil) }
+    var dragMouseButton: Int { twoFingerDragButton == "right" ? 2 : 1 }
     mutating func constrain() {
         if let key = twoFingerDoubleTap { twoFingerDoubleTap = String(key.prefix(32)) }
         twoFingerTap=String(twoFingerTap.prefix(32)); threeFingerTap=String(threeFingerTap.prefix(32))
         if let click = secondFingerClick, !["left", "right"].contains(click) { secondFingerClick = nil }
+        if let button = twoFingerDragButton, !["left", "right"].contains(button) { twoFingerDragButton = nil }
     }
 }
 
