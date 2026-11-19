@@ -14,6 +14,7 @@ public partial class Main : Node2D
 
     public override void _Ready()
     {
+        if (!StartupSettings.Passed) throw new Exception("Typed C# autoload did not initialize before the main scene");
         using (var animation = new Animation())
         {
             LegacyApiCalls.WriteAnimationLength(animation, 0.75f);

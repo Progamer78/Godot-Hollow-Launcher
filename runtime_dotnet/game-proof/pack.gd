@@ -7,7 +7,7 @@ func _initialize():
 		return
 	var packer = PCKPacker.new()
 	assert(packer.pck_start(args[0]) == OK)
-	for name in ["project.godot", "Main.tscn", "Main.cs", "ReentryAvatar.cs", "reentry/Avatar.tscn", "reentry/Nested.tscn"]:
+	for name in ["project.godot", "Main.tscn", "Main.cs", "StartupSettings.cs", "ReentryAvatar.cs", "reentry/Avatar.tscn", "reentry/Nested.tscn"]:
 		assert(packer.add_file("res://" + name, "res://" + name) == OK)
 	if args.size() == 2:
 		assert(packer.add_file("res://.godot/mono/publish/x86_64/HollowDotnetProof.dll", args[1]) == OK)

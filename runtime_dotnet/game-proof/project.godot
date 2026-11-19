@@ -8,5 +8,8 @@ config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
 [dotnet]
 project/assembly_name="HollowDotnetProof"
 
+[autoload]
+StartupSettings="*res://StartupSettings.cs"
+
 [rendering]
 renderer/rendering_method="gl_compatibility"
