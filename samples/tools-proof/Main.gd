@@ -204,7 +204,7 @@ func run_checks():
     var refreshed = tools.request({"action":"search_results"})
     check(refreshed.rows[0].value == "81" and refreshed.rows[0].previous == "80" and refreshed.searchSteps == 0, "refresh retains comparison baseline")
     tools.request({"action":"scene_tree"})
-    tools.request({"action":"capture_activity"})
+    complete_activity({"action":"capture_activity"})
     persistent = complete_search({"action":"refine_numbers","kind":"any","comparison":"changed","search":"MONEY"})
     check(persistent.candidateCount == 1 and persistent.rows[0].value == "81", "other panels never consume changed search")
     var restored = tools.request({"action":"undo_search"})
@@ -222,7 +222,7 @@ func run_checks():
     player_name = "New screen"
     text_search = complete_search({"action":"refine_numbers","kind":"string","comparison":"changed"})
     check(text_search.candidateCount == 1 and text_search.rows[0].value == player_name, "text changed search")
-    var activity = tools.request({"action":"compare_activity"})
+    var activity = complete_activity({"action":"compare_activity"})
     check(activity.ok and activity.changedCount >= 2, "scene change snapshot catches boolean and text changes independently")
     var scene = tools.request({"action":"scene_tree","search":"ToolsProof"})
     check(scene.ok and scene.nodes.size() >= 1 and scene.currentScene.scriptPath.ends_with("Main.gd"), "scene inspector reports actual script and scene paths")
@@ -241,6 +241,30 @@ func run_checks():
     button.free()
     # More than twenty pages, and beyond both previous array/candidate limits.
     for i in range(2505): search_fixture.append(i)
+    var full_activity = complete_activity({"action":"capture_activity", "search":"search_fixture"})
+    check(full_activity.snapshotCount == 2505 and not full_activity.truncated, "scene snapshot captures beyond 2000 values")
+    for i in range(2505): search_fixture[i] += 1
+    full_activity = complete_activity({"action":"compare_activity"})
+    check(full_activity.changedCount == 2505 and full_activity.pageCount == 26, "all scene changes are paginated")
+    var activity_last = tools.request({"action":"activity_results", "page":25})
+    check(activity_last.rows.size() == 5 and activity_last.rows[4].previous == "2504" and activity_last.rows[4].value == "2505", "last scene change page retains original baseline and live value")
+    search_fixture[2504] = 2504
+    full_activity = complete_activity({"action":"compare_activity"})
+    check(full_activity.changedCount == 2504, "repeated comparisons retain capture baseline rather than previous comparison")
+    tools.request({"action":"clear_activity"})
+    check(not tools.request({"action":"compare_activity"}).ok, "clearing scene snapshot releases it")
+    for i in range(2505): search_fixture[i] = i
+    var large_root = Node.new()
+    large_root.name = "LargeSceneFixture"
+    add_child(large_root)
+    for i in range(1205):
+        var child = Node.new(); child.name = "PageNode" + str(i); large_root.add_child(child)
+    var scene_pages = tools.request({"action":"scene_tree", "search":"PageNode", "visibleOnly":false})
+    while scene_pages.searching: scene_pages = tools.request({"action":"continue_scene"})
+    check(scene_pages.candidateCount == 1205 and scene_pages.pageCount == 13 and not scene_pages.truncated, "scene tree visits nodes beyond old 600-node ceiling")
+    var scene_last = tools.request({"action":"scene_tree", "refresh":false, "page":12})
+    check(scene_last.nodes.size() == 5 and scene_last.nodes[4].name == "PageNode1204", "scene object last page is accessible")
+    large_root.free()
     var pending = tools.request({"action":"find_numbers","kind":"number","comparison":"any","search":"search_fixture"})
     check(pending.ok and pending.searching, "large search yields instead of blocking for whole traversal")
     check(not tools.request({"action":"find_numbers","comparison":"any"}).ok, "concurrent discovery is refused without corrupting current work")
@@ -357,6 +381,15 @@ func complete_search(command):
         reply = tools.request({"action":"continue_search"})
         batches += 1
     check(reply.ok and not reply.get("searching", false), "batched search completes")
+    return reply
+
+func complete_activity(command):
+    var reply = tools.request(command)
+    var batches = 0
+    while reply.ok and reply.get("searching", false) and batches < 3000:
+        reply = tools.request({"action":"continue_activity"})
+        batches += 1
+    check(reply.ok and not reply.get("searching", false), "scene activity job completes in bounded batches")
     return reply
 
 func wire_request(command):

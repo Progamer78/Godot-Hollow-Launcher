@@ -123,7 +123,7 @@ static void move_mouse(CGPoint point, UIView *source, BOOL relative) {
     else {
         position.x = CLAMP(position.x, 0, MAX(0, view.bounds.size.width * scale - 1));
         position.y = CLAMP(position.y, 0, MAX(0, view.bounds.size.height * scale - 1));
-        delta = position - old;
+        if (!relative) delta = position - old;
     }
     Ref<InputEventMouseMotion> event; event.instance();
     event->set_position(position); event->set_global_position(position);

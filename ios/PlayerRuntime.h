@@ -24,6 +24,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (CGPoint)mousePositionInView:(UIView *)view NS_SWIFT_NAME(mousePosition(in:));
 + (void)setMouseButton:(NSInteger)button pressed:(BOOL)pressed;
 + (void)scrollMouse:(NSInteger)direction;
++ (void)configureGameSystemGestures;
 + (BOOL)mouseCaptured;
 + (BOOL)mouseCursorVisible;
 + (NSUInteger)mouseCursorRevision;

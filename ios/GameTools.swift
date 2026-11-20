@@ -68,7 +68,7 @@ struct GameTools: View {
             refreshSearch()
             refreshFreezes()
             DispatchQueue.global(qos: .userInitiated).async {
-                let result = Result { try library.vault.backup(gameID, label: "Automatic: before tools") }
+                let result = Result { try library.vault.automaticBackup(gameID, event: "tools") }
                 DispatchQueue.main.async {
                     switch result { case .success: backedUp = true; case .failure(let error): backupFailed = true; status = error.localizedDescription }
                 }

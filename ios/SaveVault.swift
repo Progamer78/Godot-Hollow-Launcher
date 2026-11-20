@@ -15,6 +15,15 @@ struct SaveSnapshot: Codable, Identifiable {
     let bytes: Int64
 }
 
+struct BackupPolicy: Codable {
+    var beforeLaunch = true
+    var beforeTools = true
+    var beforeReplacement = true
+    var count = 5
+    var budgetMB = 1024
+    mutating func constrain() { count = min(20, max(1, count)); budgetMB = min(8192, max(64, budgetMB)) }
+}
+
 enum SafeFiles {
     static func children(_ root: URL, excluding: Set<String> = [], directory: ((String) throws -> Void)? = nil) throws -> [(URL, String, Int64)] {
         guard FileManager.default.fileExists(atPath: root.path) else { return [] }
@@ -62,6 +71,31 @@ final class SaveVault {
     init(root: URL, saves: URL) { self.root = root; self.saves = saves }
     private func gameRoot(_ id: UUID) -> URL { root.appendingPathComponent(id.uuidString) }
     private func saveRoot(_ id: UUID) -> URL { saves.appendingPathComponent(id.uuidString) }
+    static let excluded: Set<String> = ["player.log", "startup.log", "startup.previous.log", "logs", "shader_cache"]
+    func policy(_ id: UUID) -> BackupPolicy {
+        guard let data = UserDefaults.standard.data(forKey: "hollowBackupPolicy.\(id.uuidString)"),
+              var result = try? JSONDecoder().decode(BackupPolicy.self, from: data) else { return BackupPolicy() }
+        result.constrain(); return result
+    }
+    func setPolicy(_ id: UUID, _ policy: BackupPolicy) {
+        var value = policy; value.constrain()
+        UserDefaults.standard.set(try? JSONEncoder().encode(value), forKey: "hollowBackupPolicy.\(id.uuidString)")
+    }
+    @discardableResult
+    func automaticBackup(_ id: UUID, event: String) throws -> SaveSnapshot? {
+        let settings = policy(id)
+        if (event == "launch" && !settings.beforeLaunch) || (event == "tools" && !settings.beforeTools) || (event == "replacement" && !settings.beforeReplacement) { return nil }
+        if try SafeFiles.children(saveRoot(id), excluding: Self.excluded).isEmpty { return nil }
+        return try backup(id, label: "Automatic: before \(event)")
+    }
+    func pruneAutomatic(_ id: UUID) throws {
+        let settings = policy(id)
+        var total: Int64 = 0
+        for (index, snapshot) in try snapshots(id).filter({ $0.label.hasPrefix("Automatic:") }).enumerated() {
+            total += snapshot.bytes
+            if index >= settings.count || total > Int64(settings.budgetMB) * 1024 * 1024 { try remove(id, snapshot: snapshot) }
+        }
+    }
     func snapshots(_ id: UUID) throws -> [SaveSnapshot] {
         guard FileManager.default.fileExists(atPath: gameRoot(id).path) else { return [] }
         return try FileManager.default.contentsOfDirectory(at: gameRoot(id), includingPropertiesForKeys: nil).compactMap { folder -> SaveSnapshot? in
@@ -71,16 +105,23 @@ final class SaveVault {
     }
     @discardableResult
     func backup(_ id: UUID, label: String) throws -> SaveSnapshot {
+        let sourceBytes = try SafeFiles.children(saveRoot(id), excluding: Self.excluded).reduce(Int64(0)) { $0 + $1.2 }
+        if label.hasPrefix("Automatic:"), sourceBytes > Int64(policy(id).budgetMB) * 1024 * 1024 {
+            throw PackError.invalid("These saves exceed this game's automatic-backup budget. Increase it in Saves & Backups or turn off the optional backup for this action. No existing saves or backups were deleted.")
+        }
+        if let free = try? root.deletingLastPathComponent().resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage,
+           free < sourceBytes + 32 * 1024 * 1024 {
+            throw PackError.invalid("Not enough free space to back up these saves safely. Free space or change this game's backup settings before trying again.")
+        }
         let identity = UUID(); let folder = gameRoot(id).appendingPathComponent(identity.uuidString)
         let staging = gameRoot(id).appendingPathComponent("staging-\(identity.uuidString)")
         defer { try? FileManager.default.removeItem(at: staging) }
-        let bytes = try SafeFiles.copyTree(saveRoot(id), to: staging.appendingPathComponent("files"), excluding: ["player.log", "shader_cache"])
+        let bytes = try SafeFiles.copyTree(saveRoot(id), to: staging.appendingPathComponent("files"), excluding: Self.excluded)
         let snapshot = SaveSnapshot(id: identity, created: Date(), label: String(label.prefix(100)), bytes: bytes)
         try JSONEncoder().encode(snapshot).write(to: staging.appendingPathComponent("snapshot.json"), options: .atomic)
         try FileManager.default.moveItem(at: staging, to: folder)
         if label.hasPrefix("Automatic:") {
-            let automatic = (try? snapshots(id).filter { $0.label.hasPrefix("Automatic:") }) ?? []
-            for old in automatic.dropFirst(5) { try? remove(id, snapshot: old) }
+            try pruneAutomatic(id)
         }
         return snapshot
     }
@@ -112,7 +153,7 @@ final class SaveVault {
     }
     func export(_ id: UUID, to url: URL) throws {
         var paths: [String] = [], names: [String] = []
-        let files = try SafeFiles.children(saveRoot(id), excluding: ["player.log", "shader_cache"], directory: { name in paths.append(self.saveRoot(id).appendingPathComponent(name).path); names.append(name + "/") })
+        let files = try SafeFiles.children(saveRoot(id), excluding: Self.excluded, directory: { name in paths.append(self.saveRoot(id).appendingPathComponent(name).path); names.append(name + "/") })
         guard !files.isEmpty else { throw PackError.invalid("No save files to export yet. Save in the game first.") }
         try GPArchive.create(url.path, files: paths + files.map { $0.0.path }, names: names + files.map { $0.1 })
     }

@@ -6,6 +6,7 @@ struct SceneToolsPanel: View {
     let canEdit: Bool
     let onEdit: (ToolStat) -> Void
     @State private var selected: ToolSceneNode?
+    private let progressTimer = Timer.publish(every: 0.03, on: .main, in: .common).autoconnect()
 
     var body: some View {
         List {
@@ -20,17 +21,24 @@ struct SceneToolsPanel: View {
                 Button("Refresh Scene", action: refresh)
                 if state.sceneReply?.ok == false { Text(state.sceneReply?.message ?? "Scene unavailable.").foregroundColor(.orange) }
             }
-            Section(header: Text("Changes after an action"), footer: Text("Capture, close tools and perform an action, then compare. This separate snapshot never changes your Search candidates. It checks up to 2,000 accessible script values; it does not record executed branches.")) {
-                Button("Capture Snapshot") { state.activityReply = ToolsBridge.send(["action": "capture_activity"]) }
-                Button("Compare Changes") { state.activityReply = ToolsBridge.send(["action": "compare_activity"]) }
+            Section(header: Text("Changes after an action"), footer: Text("Capture, close tools and perform an action, then compare against the original snapshot. Names filter the full scan. Snapshots are independent of Search, cover up to 250,000 accessible values, and stay in memory until replaced or cleared. They do not record executed branches.")) {
+                TextField("Variable name or path filter (optional)", text: $state.activityFilter).autocapitalization(.none).disableAutocorrection(true)
+                Toggle("Capture current scene only", isOn: $state.activitySceneOnly)
+                Button("Capture Snapshot") {
+                    state.activityReply = ToolsBridge.send(["action": "capture_activity", "search": state.activityFilter,
+                        "scope": state.activitySceneOnly ? (state.sceneReply?.currentScene?.object ?? "") : ""])
+                }.disabled(state.activitySceneOnly && state.sceneReply?.currentScene == nil)
+                Button("Compare Changes") { state.activityReply = ToolsBridge.send(["action": "compare_activity"]) }.disabled(state.activityReply?.searching == true)
+                if state.activityReply != nil { Button("Clear Snapshot & Free Memory") { state.activityReply = nil; _ = ToolsBridge.send(["action": "clear_activity"]) } }
                 if let reply = state.activityReply {
                     if reply.ok {
                         Text("\(reply.changedCount ?? 0) changed · \(reply.snapshotCount ?? 0) captured · \(reply.staleCount ?? 0) unavailable").font(.caption)
+                        if reply.searching == true { ProgressView(reply.searchDiscovery == true ? "Capturing snapshot…" : "Comparing changes…") }
                         if reply.truncated == true { Text("Snapshot incomplete: scan budget reached.").font(.caption).foregroundColor(.orange) }
                         ForEach(reply.rows ?? []) { stat in
                             Button { onEdit(stat) } label: { ToolStatRow(stat: stat) }.disabled(!canEdit)
                         }
-                        if (reply.changedCount ?? 0) > (reply.rows?.count ?? 0) { Text("Showing the first 200 changes. Use Search to narrow a larger set.").font(.caption) }
+                        pages(reply) { page in state.activityReply = ToolsBridge.send(["action": "activity_results", "page": page]) }
                     } else { Text(reply.message ?? "Capture a snapshot first.").font(.caption).foregroundColor(.orange) }
                 }
             }
@@ -44,10 +52,19 @@ struct SceneToolsPanel: View {
                         }
                     }
                 }
-                if state.sceneReply?.truncated == true { Text("Showing up to 200 objects from the first 600 scene nodes. Filter by path to narrow the list.").font(.caption).foregroundColor(.orange) }
+                if let reply = state.sceneReply {
+                    Text("\(reply.candidateCount ?? 0) matching objects").font(.caption)
+                    if reply.searching == true { ProgressView("Reading scene…") }
+                    if reply.truncated == true { Text("The 250,000-node safety budget was reached. Results are incomplete.").font(.caption).foregroundColor(.orange) }
+                    pages(reply) { page in state.sceneReply = ToolsBridge.send(["action": "scene_tree", "refresh": false, "page": page]) }
+                }
             }
         }.listStyle(InsetGroupedListStyle())
         .onAppear(perform: refresh)
+        .onReceive(progressTimer) { _ in
+            if state.sceneReply?.searching == true { state.sceneReply = ToolsBridge.send(["action": "continue_scene"]) }
+            if state.activityReply?.searching == true { state.activityReply = ToolsBridge.send(["action": "continue_activity"]) }
+        }
         .sheet(item: $selected) { node in
             SceneNodeInspector(object: node.object) { chosen in
                 state.scope = chosen.object; state.scopeLabel = chosen.path; state.tab = "search"; selected = nil
@@ -56,6 +73,15 @@ struct SceneToolsPanel: View {
     }
     private func refresh() {
         state.sceneReply = ToolsBridge.send(["action": "scene_tree", "search": state.sceneQuery, "visibleOnly": state.visibleOnly])
+    }
+    private func pages(_ reply: ToolReply, change: @escaping (Int) -> Void) -> some View {
+        HStack {
+            Button("Previous") { change((reply.page ?? 0) - 1) }.disabled((reply.page ?? 0) == 0)
+            Spacer()
+            Text("Page \((reply.page ?? 0) + 1) of \(reply.pageCount ?? 1)").font(.caption)
+            Spacer()
+            Button("Next") { change((reply.page ?? 0) + 1) }.disabled((reply.page ?? 0) + 1 >= (reply.pageCount ?? 1))
+        }.buttonStyle(BorderlessButtonStyle())
     }
 }
 

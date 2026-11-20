@@ -20,9 +20,10 @@ struct SaveManager: View {
     @State private var sharing = false
     @State private var requestedAction: SaveAction?
     @State private var editingFile: EditableSave?
+    @State private var policy = BackupPolicy()
     var body: some View {
         List {
-            Section(header: Text("Protect your progress"), footer: Text("Restore/import is available before Play. Each restore/import first backs up the current saves. The five newest automatic backups are retained; manual backups stay until you delete them.")) {
+            Section(header: Text("Protect your progress"), footer: Text("Restore/import is available before Play. Saves are backed up according to your settings below. Manual backups stay until you delete them.")) {
                 if busy { ProgressView("Working with your saves…") }
                 Button("Create Manual Backup") { work { _ = try library.vault.backup(game.id, label: "Manual backup") } }
                 Button("Export Saves as ZIP") {
@@ -34,6 +35,16 @@ struct SaveManager: View {
                 }
                 Button("Import Saves from ZIP") { importing = true }
                 if !status.isEmpty { Text(status).font(.caption) }
+            }.disabled(busy)
+            Section(header: Text("Automatic backup options"), footer: Text("Limits apply per game and only to automatic backups. Manual backups are not deleted. Creating a backup temporarily needs space for the new copy before older backups are pruned. Logs and shader caches are excluded. Save restore, import and file editing always require a protective backup. Full previous game downloads are not retained.")) {
+                Toggle("Before launching", isOn: $policy.beforeLaunch)
+                Toggle("Before opening game tools", isOn: $policy.beforeTools)
+                Toggle("Before replacing the game", isOn: $policy.beforeReplacement)
+                Stepper("Keep up to \(policy.count) automatic backups", value: $policy.count, in: 1...20)
+                Picker("Automatic backup space budget", selection: $policy.budgetMB) {
+                    ForEach([64, 128, 256, 512, 1024, 2048, 4096, 8192], id: \.self) { mb in Text(mb < 1024 ? "\(mb) MB" : "\(mb / 1024) GB").tag(mb) }
+                }
+                Button("Apply Limits to Existing Automatic Backups") { work { try library.vault.pruneAutomatic(game.id) } }
             }.disabled(busy)
             Section(header: Text("Backups")) {
                 if snapshots.isEmpty { Text("No backups yet. Create one here, or play a game to create an automatic backup.").font(.subheadline).foregroundColor(.secondary) }
@@ -59,7 +70,12 @@ struct SaveManager: View {
                 }
             }.disabled(busy)
         }.navigationTitle("Saves & Backups")
-        .onAppear { reload() }
+        .onAppear { policy = library.vault.policy(game.id); reload() }
+        .onChange(of: policy.beforeLaunch) { _ in library.vault.setPolicy(game.id, policy) }
+        .onChange(of: policy.beforeTools) { _ in library.vault.setPolicy(game.id, policy) }
+        .onChange(of: policy.beforeReplacement) { _ in library.vault.setPolicy(game.id, policy) }
+        .onChange(of: policy.count) { _ in library.vault.setPolicy(game.id, policy) }
+        .onChange(of: policy.budgetMB) { _ in library.vault.setPolicy(game.id, policy) }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.zip]) { result in
             switch result {
             case .success(let url):

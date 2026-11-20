@@ -36,6 +36,8 @@ final class GameToolsState: ObservableObject {
     @Published var visibleOnly = true
     @Published var sceneReply: ToolReply?
     @Published var activityReply: ToolReply?
+    @Published var activityFilter = ""
+    @Published var activitySceneOnly = false
 
     var encodedValue: String { kind == "bool" ? booleanValue : value }
     var scopeChanged: Bool { hasSearch && scope != searchedScope }

@@ -76,11 +76,14 @@ struct HollowHelp: View {
     @AppStorage("hollowPerformanceHUD") private var performanceHUD = false
     @AppStorage("hollowHUDCorner") private var hudCorner = "topLeft"
     @AppStorage("hollowPinnedMonitor") private var pinnedMonitor = false
+    @AppStorage("hollowHideHomeIndicator") private var hideHomeIndicator = true
     var body: some View {
         NavigationView {
             List {
                 Section { HollowWelcome(count: 0).listRowInsets(EdgeInsets()).listRowBackground(Color.clear) }
                 Section(header: Text("Preferences")) {
+                    Toggle("Auto-hide Home indicator in games", isOn: $hideHomeIndicator)
+                    Text("Also reduces accidental system edge swipes. iOS can reveal the indicator again; the Home gesture remains available. Changes apply when opening a game.").font(.caption).foregroundColor(.secondary)
                     Toggle("Keep screen awake while playing", isOn: $keepAwake)
                     Toggle("Performance HUD", isOn: $performanceHUD)
                     Toggle("Pinned value monitor", isOn: $pinnedMonitor)

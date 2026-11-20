@@ -287,12 +287,18 @@ final class GameLibrary: ObservableObject {
         if let pending = pendingImport { try? files.removeItem(at: pending.staging); try? files.removeItem(at: GameFiles.staging(for: pending.staging)) }
         pendingImport = nil
     }
-    func confirmImport() {
+    func confirmImport(backupSaves: Bool? = nil) {
         guard !importing, let pending = pendingImport else { return }
         importing = true
         importStatus = "Backing up saves and replacing game…"
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try self.vault.backup(pending.game.id, label: "Automatic: before game replacement") }
+            let result = Result { () throws -> SaveSnapshot? in
+                if let backupSaves = backupSaves {
+                    if backupSaves { return try self.vault.backup(pending.game.id, label: "Automatic: before replacement") }
+                    return nil
+                }
+                return try self.vault.automaticBackup(pending.game.id, event: "replacement")
+            }
             DispatchQueue.main.async {
                 defer { self.importing = false; self.importStatus = ""; self.pendingImport = nil; try? self.files.removeItem(at: pending.staging); try? self.files.removeItem(at: GameFiles.staging(for: pending.staging)) }
                 do {
@@ -311,7 +317,7 @@ final class GameLibrary: ObservableObject {
         if let reason = RuntimeSelection.problem(for: checked) { throw PackError.invalid(reason) }
         try files.createDirectory(at: gameFilesURL(game), withIntermediateDirectories: true)
         try files.createDirectory(at: saveURL(game), withIntermediateDirectories: true)
-        _ = try vault.backup(game.id, label: "Automatic: before launch")
+        _ = try vault.automaticBackup(game.id, event: "launch")
     }
 
     func importGameFiles(_ source: URL, for game: Game, folder: Bool) {

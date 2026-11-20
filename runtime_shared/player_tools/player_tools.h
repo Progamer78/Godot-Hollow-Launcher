@@ -49,7 +49,15 @@ class PlayerTools : public PlayerToolsBase {
     bool candidate_truncated = false;
     int search_steps = 0;
     Vector<SearchSnapshot> search_history;
-    Array activity_baseline;
+    Ref<PlayerTools> activity_index;
+    Vector<int> activity_changes, activity_working_changes;
+    int activity_cursor = 0, activity_stale = 0, activity_page = 0;
+    bool activity_comparing = false;
+    String scene_query;
+    bool scene_visible_only = true;
+    Array scene_pending, scene_matches;
+    int scene_cursor = 0, scene_page = 0;
+    bool scene_scanning = false, scene_limited = false;
     bool activity_ready = false;
     bool activity_truncated = false;
     int max_rows = 150;

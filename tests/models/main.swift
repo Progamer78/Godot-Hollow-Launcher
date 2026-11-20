@@ -480,6 +480,39 @@ do {
 print("Library recovery, filtering/sorting, deletion rollback and multi-stick mouse transition passed")
 
 do {
+    var gestures = TouchGestures(); gestures.edgeScroll = "right"; gestures.cameraLook = "right"; gestures.cameraButton = "none"
+    gestures.scrollSpeed = 2; gestures.reverseScroll = true
+    let decoded = try JSONDecoder().decode(TouchGestures.self, from: JSONEncoder().encode(gestures))
+    require(decoded.cameraLook == "right" && decoded.cameraMouseButton == nil && decoded.edgeScroll == "right", "Camera and scroll choices persist")
+    var motion = MouseWheelMotion()
+    require(motion.steps(delta: 5, profile: decoded) == 0 && motion.steps(delta: 7, profile: decoded) == -1, "Small scroll motions accumulate with speed and reverse direction")
+    require(abs(motion.steps(delta: 1_000_000, profile: decoded)) == 24 && motion.steps(delta: 0, profile: decoded) == 0, "Scroll jumps are bounded without delayed event flooding")
+    gestures.scrollSpeed = .nan; gestures.edgeScrollWidth = .infinity; gestures.cameraLook = "bad"; gestures.constrain()
+    require(gestures.scrollSpeed == 1 && gestures.edgeScrollWidth == 36 && gestures.cameraLook == nil, "Invalid gesture settings normalize safely")
+    let identity = UUID(), saveBase = temporary.appendingPathComponent("PolicySaves"), backupBase = temporary.appendingPathComponent("PolicyBackups")
+    let vault = SaveVault(root: backupBase, saves: saveBase)
+    let folder = saveBase.appendingPathComponent(identity.uuidString)
+    try FileManager.default.createDirectory(at: folder.appendingPathComponent("logs"), withIntermediateDirectories: true)
+    try Data("diagnostics only".utf8).write(to: folder.appendingPathComponent("logs/modloader.log"))
+    let emptyBackup = try vault.automaticBackup(identity, event: "launch")
+    require(emptyBackup == nil, "Diagnostics alone do not create empty automatic backups")
+    try Data("progress".utf8).write(to: folder.appendingPathComponent("save.dat"))
+    var policy = BackupPolicy(); policy.count = 2; policy.budgetMB = 64; policy.beforeLaunch = false; vault.setPolicy(identity, policy)
+    let disabledBackup = try vault.automaticBackup(identity, event: "launch")
+    require(disabledBackup == nil && vault.policy(identity).count == 2, "Optional launch backup and retention policy persist")
+    _ = try vault.backup(identity, label: "Manual backup")
+    for _ in 0..<4 { _ = try vault.automaticBackup(identity, event: "tools") }
+    let snapshots = try vault.snapshots(identity)
+    require(snapshots.count == 3 && snapshots.filter { $0.label.hasPrefix("Automatic:") }.count == 2, "Automatic retention never deletes manual backups")
+    let sparse = folder.appendingPathComponent("large.dat")
+    FileManager.default.createFile(atPath: sparse.path, contents: Data())
+    let handle = try FileHandle(forWritingTo: sparse); try handle.truncate(atOffset: 65 * 1024 * 1024); try handle.close()
+    do { _ = try vault.automaticBackup(identity, event: "tools"); preconditionFailure("Oversize automatic backup accepted") }
+    catch { let remaining = try vault.snapshots(identity); require(remaining.count == 3, "Budget failure leaves previous backups intact") }
+    UserDefaults.standard.removeObject(forKey: "hollowBackupPolicy.\(identity.uuidString)")
+}
+
+do {
     var gestures = TouchGestures()
     gestures.secondFingerClick = "right"; gestures.constrain()
     let decoded = try JSONDecoder().decode(TouchGestures.self, from: JSONEncoder().encode(gestures))

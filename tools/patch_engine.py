@@ -137,6 +137,11 @@ def patch(engine):
 
     from patch_game_paths import patch as patch_game_paths
     patch_game_paths(engine)
+    controller = apple / "godot_view_controller.mm"
+    replace(controller, '- (BOOL)prefersHomeIndicatorAutoHidden {',
+        '- (BOOL)prefersHomeIndicatorAutoHidden {\n\treturn ![NSUserDefaults.standardUserDefaults objectForKey:@"hollowHideHomeIndicator"] || [NSUserDefaults.standardUserDefaults boolForKey:@"hollowHideHomeIndicator"];')
+    replace(controller, '- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures {',
+        '- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures {\n\tif (![NSUserDefaults.standardUserDefaults objectForKey:@"hollowHideHomeIndicator"] || [NSUserDefaults.standardUserDefaults boolForKey:@"hollowHideHomeIndicator"]) return UIRectEdgeAll;')
     os_file = apple / "os_apple_embedded.mm"
     # Main::start returns a status, but upstream's void start() discards it.
     # Scene loading may fail after creating a main loop, so that pointer alone

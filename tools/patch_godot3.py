@@ -88,6 +88,10 @@ def patch(engine):
     replace(os_file, 'int OSIPhone::get_mouse_button_state() const {\n\t// Not supported for iOS\n\treturn 0;',
             'int OSIPhone::get_mouse_button_state() const {\n\treturn input ? input->get_mouse_button_mask() : 0;')
     controller = ios / "view_controller.mm"
+    replace(controller, '- (BOOL)prefersHomeIndicatorAutoHidden {',
+        '- (BOOL)prefersHomeIndicatorAutoHidden {\n\treturn ![NSUserDefaults.standardUserDefaults objectForKey:@"hollowHideHomeIndicator"] || [NSUserDefaults.standardUserDefaults boolForKey:@"hollowHideHomeIndicator"];')
+    replace(controller, '- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures {',
+        '- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures {\n\tif (![NSUserDefaults.standardUserDefaults objectForKey:@"hollowHideHomeIndicator"] || [NSUserDefaults.standardUserDefaults boolForKey:@"hollowHideHomeIndicator"]) return UIRectEdgeAll;')
     replace(controller, '- (BOOL)shouldAutorotate {', '- (BOOL)shouldAutorotate {\n\treturn YES;')
     replace(controller, '- (UIInterfaceOrientationMask)supportedInterfaceOrientations {',
             '- (UIInterfaceOrientationMask)supportedInterfaceOrientations {\n\treturn UIInterfaceOrientationMaskPortrait | UIInterfaceOrientationMaskLandscape;')

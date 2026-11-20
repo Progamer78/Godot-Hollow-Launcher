@@ -11,17 +11,19 @@ enum PlayerRuntime {
     static var cursorPositionReads = 0
     static var cursorVisibilityReads = 0
     static var mouseEvents: [(Int, Bool)] = []
+    static var scrollEvents: [Int] = []
+    static var motionEvents: [CGPoint] = []
     static func setKey(_ key: String, pressed: Bool) { keyEvents.append((key, pressed)) }
     static func releaseKeys() {}
     static func setMouseButton(_ button: Int, pressed: Bool) { mouseEvents.append((button, pressed)) }
-    static func scrollMouse(_ direction: Int) {}
+    static func scrollMouse(_ direction: Int) { scrollEvents.append(direction) }
     static func mouseCaptured() -> Bool { false }
     static func mouseCursorRevision() -> UInt { cursorPolls += 1; return 1 }
     static func mouseCursorImage() -> UIImage? { nil }
     static func mouseCursorHotspot() -> CGPoint { .zero }
     static func mousePosition(in view: UIView) -> CGPoint { cursorPositionReads += 1; return CGPoint(x: 20, y: 20) }
     static func mouseCursorVisible() -> Bool { cursorVisibilityReads += 1; return true }
-    static func moveMouse(_ point: CGPoint, from view: UIView, relative: Bool) {}
+    static func moveMouse(_ point: CGPoint, from view: UIView, relative: Bool) { if relative { motionEvents.append(point) } }
 }
 struct SmokeReply { let ok: Bool }
 
@@ -135,7 +137,27 @@ final class InputSmokeApp: UIResponder, UIApplicationDelegate {
                       "\(button) drag must press/release its own button on \(end)")
             }
         }
+        var camera = TouchGestures(); camera.cameraLook = "right"; camera.cameraButton = "right"
+        mouse.configureGestures(camera)
+        PlayerRuntime.mouseEvents = []; PlayerRuntime.motionEvents = []
+        let looking = SmokeTouch(); looking.point = CGPoint(x: 60, y: 20)
+        mouse.touchesBegan([looking], with: nil)
+        looking.state = .moved; looking.point.y += 15; mouse.touchesMoved([looking], with: nil)
+        looking.state = .ended; mouse.touchesEnded([looking], with: nil)
+        check(PlayerRuntime.mouseEvents.count == 2 && PlayerRuntime.mouseEvents[0].0 == 2 && PlayerRuntime.mouseEvents[0].1 && !PlayerRuntime.mouseEvents[1].1 && PlayerRuntime.motionEvents.last?.y == 15, "One-finger camera sends relative movement while holding and releasing right click")
+        camera.cameraButton = "none"; camera.edgeScroll = "right"; camera.edgeScrollWidth = 20; camera.scrollSpeed = 2
+        mouse.configureGestures(camera)
+        PlayerRuntime.mouseEvents = []; PlayerRuntime.scrollEvents = []; PlayerRuntime.motionEvents = []
+        let scrolling = SmokeTouch(); scrolling.point = CGPoint(x: 95, y: 10)
+        mouse.touchesBegan([scrolling], with: nil)
+        scrolling.state = .moved; scrolling.point.y += 12; mouse.touchesMoved([scrolling], with: nil)
+        scrolling.state = .ended; mouse.touchesEnded([scrolling], with: nil)
+        check(PlayerRuntime.scrollEvents == [1] && PlayerRuntime.mouseEvents.isEmpty && PlayerRuntime.motionEvents.isEmpty, "Edge scrolling sends wheel input without clicking or moving the pointer, even with camera look enabled")
+        let tap = SmokeTouch(); tap.point = CGPoint(x: 65, y: 20)
+        mouse.touchesBegan([tap], with: nil); tap.state = .ended; mouse.touchesEnded([tap], with: nil)
+        check(PlayerRuntime.mouseEvents.isEmpty, "No-button camera look does not generate a tap click")
         mouse.configureGestures(TouchGestures())
+        record("PLAYER_INPUT_UI_CHECK: one-finger camera and independent edge scrolling PASS")
         record("PLAYER_INPUT_UI_CHECK: left/right two-finger drag and cancellation PASS")
         // Exercise the same updater used by the display-link callback directly.
         // Headless CI does not guarantee a rendered frame within a wall-clock

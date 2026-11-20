@@ -373,8 +373,8 @@ Dictionary PlayerTools::request(const Dictionary &command) {
         Dictionary result; result["ok"] = true; result["rows"] = objects; result["truncated"] = pending.size() > 200; result["undoCount"] = history.size(); return result;
     }
     if (action == "scan") return scan(command.get("search", ""), command.get("scope", ""));
-    if (action == "scene_tree" || action == "scene_node") return inspect_scene(command);
-    if (action == "capture_activity" || action == "compare_activity") return scene_changes(command);
+    if (action == "scene_tree" || action == "continue_scene" || action == "scene_node") return inspect_scene(command);
+    if (action == "capture_activity" || action == "compare_activity" || action == "continue_activity" || action == "activity_results" || action == "clear_activity") return scene_changes(command);
     if (action == "search_results") {
         if (!(search_busy && search_discovery)) result_page = command.get("page", result_page);
         return search_results();
@@ -888,19 +888,37 @@ Dictionary PlayerTools::inspect_scene(const Dictionary &command) {
     Dictionary result; result["ok"] = true;
     Node *current = scene->get_current_scene();
     if (current) result["currentScene"] = scene_node_info(current);
-    if (String(command.get("action", "")) == "scene_tree") {
-        Array pending, nodes; pending.push_back(object_id(scene->get_root()));
-        String query = String(command.get("search", "")).substr(0, 100).strip_edges().to_lower();
-        bool visible_only = command.get("visibleOnly", true); int cursor = 0;
-        while (cursor < pending.size() && cursor < 600 && nodes.size() < 200) {
-            Node *node = Object::cast_to<Node>(live_object(parse_id(pending[cursor++])));
+    const String action = command.get("action", "");
+    if (action == "scene_tree" || action == "continue_scene") {
+        if (action == "scene_tree" && bool(command.get("refresh", true))) {
+            scene_pending.clear(); scene_matches.clear(); scene_cursor = 0; scene_page = 0; scene_limited = false;
+            scene_pending.push_back(object_id(scene->get_root())); scene_scanning = true;
+            scene_query = String(command.get("search", "")).substr(0, 100).strip_edges().to_lower();
+            scene_visible_only = command.get("visibleOnly", true);
+        }
+        if (command.has("page")) scene_page = MAX(0, int(command["page"]));
+        const uint64_t started = OS::get_singleton()->get_ticks_usec(); int processed = 0;
+        while (scene_scanning && scene_cursor < scene_pending.size() && processed++ < 512 && OS::get_singleton()->get_ticks_usec() - started < 6000) {
+            Node *node = Object::cast_to<Node>(live_object(parse_id(scene_pending[scene_cursor++])));
             if (!node || !node->is_inside_tree()) continue;
             Dictionary info = scene_node_info(node);
             String label = String(info["path"]) + " " + String(info["scriptPath"]);
-            if ((!visible_only || bool(info.get("visible", true))) && (is_empty_text(query) || label.to_lower().find(query) >= 0)) nodes.push_back(info);
-            for (int child = 0; child < node->get_child_count() && pending.size() < 600; child++) pending.push_back(object_id(node->get_child(child)));
+            if ((!scene_visible_only || bool(info.get("visible", true))) && (is_empty_text(scene_query) || label.to_lower().find(scene_query) >= 0)) scene_matches.push_back(object_id(node));
+            for (int child = 0; child < node->get_child_count(); child++) {
+                if (scene_pending.size() >= 250000) { scene_limited = true; break; }
+                scene_pending.push_back(object_id(node->get_child(child)));
+            }
         }
-        result["nodes"] = nodes; result["truncated"] = cursor < pending.size() || pending.size() >= 600; return result;
+        if (scene_cursor >= scene_pending.size()) { scene_scanning = false; scene_pending.clear(); }
+        const int pages = MAX(1, (scene_matches.size() + 99) / 100); scene_page = CLAMP(scene_page, 0, pages - 1);
+        Array nodes;
+        for (int i = scene_page * 100; i < MIN(scene_matches.size(), (scene_page + 1) * 100); i++) {
+            Node *node = Object::cast_to<Node>(live_object(parse_id(scene_matches[i])));
+            if (node && node->is_inside_tree()) nodes.push_back(scene_node_info(node));
+        }
+        result["nodes"] = nodes; result["truncated"] = scene_limited; result["searching"] = scene_scanning;
+        result["page"] = scene_page; result["pageCount"] = pages; result["candidateCount"] = scene_matches.size();
+        result["examined"] = scene_cursor; return result;
     }
     Node *node = Object::cast_to<Node>(live_object(parse_id(command.get("object", ""))));
     if (!node || !node->is_inside_tree()) return failure("This scene object is no longer available. Refresh the scene list.");
@@ -933,28 +951,65 @@ Dictionary PlayerTools::inspect_scene(const Dictionary &command) {
 }
 
 Dictionary PlayerTools::scene_changes(const Dictionary &command) {
-    if (String(command.get("action", "")) == "capture_activity") {
-        max_rows = 2000;
-        Dictionary captured = scan("", command.get("scope", "")); max_rows = 150;
-        if (!bool(captured.get("ok", false))) return captured;
-        activity_baseline = rows.duplicate(true); activity_ready = true; activity_truncated = truncated;
+    const String action = command.get("action", "");
+    if (action == "clear_activity") {
+        activity_index.unref(); activity_changes.clear(); activity_working_changes.clear(); activity_ready = false; activity_comparing = false;
+        Dictionary result; result["ok"] = true; return result;
     }
-    if (!activity_ready) return failure("Capture a snapshot, play the game, then compare changes.");
-    Array changed; int changed_count = 0, stale = 0;
-    for (int i = 0; i < activity_baseline.size(); i++) {
-        Dictionary original = activity_baseline[i]; Object *owner = nullptr; Array path; Variant value; String error;
-        if (!resolve(original, owner, path, value, error)) { stale++; continue; }
-        Node *node = Object::cast_to<Node>(owner);
-        if (node && !node->is_inside_tree()) { stale++; continue; }
-        String now = value.get_type() == Variant::BOOL ? (bool(value) ? String("true") : String("false")) : String(value);
-        if (now == String(original["value"]) || now.length() > 512) continue;
-        changed_count++;
-        if (changed.size() >= 200) continue;
-        Dictionary row = original.duplicate(); row["previous"] = original["value"]; row["value"] = now; row["frozen"] = is_frozen(row); changed.push_back(row);
+    if (action == "capture_activity") {
+        activity_index.unref();
+#if VERSION_MAJOR >= 4
+        activity_index.instantiate();
+#else
+        activity_index.instance();
+#endif
+        activity_ready = false; activity_comparing = false; activity_changes.clear(); activity_working_changes.clear(); activity_page = 0; activity_stale = 0;
+        Dictionary request; request["action"] = "find_numbers"; request["kind"] = "any"; request["comparison"] = "any";
+        request["scope"] = command.get("scope", ""); request["search"] = command.get("search", "");
+        Dictionary response = activity_index->find_numbers(request);
+        if (!bool(response.get("ok", false))) { activity_index.unref(); return response; }
     }
-    Dictionary result; result["ok"] = true; result["rows"] = changed; result["snapshotCount"] = activity_baseline.size();
-    result["changedCount"] = changed_count; result["staleCount"] = stale; result["truncated"] = activity_truncated;
-    return result;
+    if (activity_index.is_null()) return failure("Capture a snapshot, play the game, then compare changes.");
+    if (action == "compare_activity") {
+        if (activity_index->search_busy) return failure("Wait for the snapshot to finish before comparing.");
+        activity_comparing = true; activity_cursor = 0; activity_stale = 0; activity_working_changes.clear(); activity_page = 0;
+    }
+    if (action != "activity_results" && activity_index->search_busy) activity_index->continue_search(true);
+    activity_ready = !activity_index->search_busy;
+    if (activity_comparing && action != "activity_results") {
+        const uint64_t started = OS::get_singleton()->get_ticks_usec(); int processed = 0, cached_location = -1; Variant cached_value;
+        while (activity_cursor < activity_index->number_candidates.size() && processed++ < 4096 && OS::get_singleton()->get_ticks_usec() - started < 6000) {
+            const int index = activity_cursor++; const IndexedValue &candidate = activity_index->number_candidates[index]; Variant value;
+            if (!indexed_value(candidate, activity_index->candidate_locations, value, &cached_location, &cached_value)) { activity_stale++; continue; }
+            if (value != candidate.before) activity_working_changes.push_back(index);
+        }
+        if (activity_cursor == activity_index->number_candidates.size()) { activity_changes = activity_working_changes; activity_working_changes = Vector<int>(); activity_comparing = false; }
+    }
+    if (command.has("page")) activity_page = MAX(0, int(command["page"]));
+    const Vector<int> &changes = activity_comparing ? activity_working_changes : activity_changes;
+    const int pages = MAX(1, (changes.size() + 99) / 100); activity_page = CLAMP(activity_page, 0, pages - 1);
+    Array displayed;
+    for (int i = activity_page * 100; i < MIN(changes.size(), (activity_page + 1) * 100); i++) {
+        const IndexedValue &candidate = activity_index->number_candidates[changes[i]]; Variant value;
+        if (!indexed_value(candidate, activity_index->candidate_locations, value)) continue;
+        const IndexedLocation &location = activity_index->candidate_locations[candidate.location];
+        Array path = location.path.duplicate();
+        if (candidate.step != COMPLETE_PATH) {
+            Dictionary step; step["kind"] = candidate.step == ARRAY_ELEMENT ? "array" : (candidate.step == INTEGER_KEY ? "dictionary_int" : "dictionary");
+            if (candidate.step == ARRAY_ELEMENT) step["index"] = candidate.key; else step["name"] = String(candidate.key);
+            path.push_back(step);
+        }
+        Dictionary row; row["object"] = String::num_uint64(location.owner); row["path"] = path;
+        row["label"] = indexed_label(candidate, activity_index->candidate_locations); row["type"] = scalar_type(value);
+        row["previous"] = stat_text(candidate.before); row["value"] = stat_text(value); row["frozen"] = is_frozen(row); displayed.push_back(row);
+    }
+    Dictionary result; result["ok"] = true; result["rows"] = displayed;
+    result["snapshotCount"] = activity_ready ? activity_index->number_candidates.size() : activity_index->working_candidates.size();
+    result["changedCount"] = changes.size(); result["staleCount"] = activity_stale;
+    result["truncated"] = activity_ready ? activity_index->candidate_truncated : activity_index->working_truncated;
+    result["searching"] = !activity_ready || activity_comparing; result["searchDiscovery"] = !activity_ready;
+    result["examined"] = activity_ready ? activity_cursor : activity_index->working_examined;
+    result["page"] = activity_page; result["pageCount"] = pages; return result;
 }
 
 String PlayerTools::dispatch_json(const String &json) {

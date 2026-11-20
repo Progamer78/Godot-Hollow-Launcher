@@ -22,6 +22,7 @@ struct PlayerRoot: View {
     @State private var session: GameSession?
     @State private var picker = false
     @State private var replacement: Game?
+    @State private var replacementBackup = true
     @State private var starting = false
     @State private var search = ""
     @State private var favoritesOnly = false
@@ -116,12 +117,15 @@ struct PlayerRoot: View {
                     Text("Size: \(ByteCountFormatter.string(fromByteCount: Int64(clamping: candidate.game.pack.byteCount), countStyle: .file)) -> \(ByteCountFormatter.string(fromByteCount: Int64(clamping: candidate.pack.byteCount), countStyle: .file))")
                     Text("Native descriptors: \((candidate.pack.nativeFiles ?? []).joined(separator: ", "))").font(.caption)
                     if let note = candidate.note { Text(note).font(.caption) }
-                    Text("Saves and control layouts keep their identity. A save backup is created first, but the new game version may use an incompatible save format.")
+                    Text("Saves and control layouts keep their identity. The old and incoming game temporarily coexist while importing. The old game pack is removed after a successful replacement; no full-game rollback copy is retained.")
+                    Toggle("Back up saves before replacement", isOn: $replacementBackup)
+                    Text("Automatic-backup limits are configured on the game page under Saves & Backups. New versions may use an incompatible save format.").font(.caption)
                     if candidate.game.pack.major != candidate.pack.major { Text("The engine family changed. Runtime and renderer overrides will reset to automatic/project defaults.").foregroundColor(.orange) }
-                    Button(library.importing ? "Backing up and replacing..." : "Back Up & Replace") { library.confirmImport() }.disabled(library.importing)
+                    Button(library.importing ? "Replacing..." : (replacementBackup ? "Back Up & Replace" : "Replace Game")) { library.confirmImport(backupSaves: replacementBackup) }.disabled(library.importing)
                     Button("Cancel") { library.cancelImport() }.disabled(library.importing)
                 }.navigationTitle("Review Game Update")
             }.navigationViewStyle(StackNavigationViewStyle()).interactiveDismissDisabled(library.importing)
+                .onAppear { replacementBackup = library.vault.policy(candidate.game.id).beforeReplacement }
         }
         .alert(isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
             let message = library.error ?? "Please try again."

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstring>
 #include <unistd.h>
+#import <objc/runtime.h>
 #include "core/io/logger.h"
 #import "app_delegate_service.h"
 #import "godot_app_delegate.h"
@@ -72,6 +73,20 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
 }
 
 @implementation PlayerRuntime
++ (void)configureGameSystemGestures {
+    BOOL hide = ![NSUserDefaults.standardUserDefaults objectForKey:@"hollowHideHomeIndicator"] || [NSUserDefaults.standardUserDefaults boolForKey:@"hollowHideHomeIndicator"];
+    UIWindow *window = nil;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class] || scene.activationState != UISceneActivationStateForegroundActive) continue;
+        for (UIWindow *candidate in ((UIWindowScene *)scene).windows) if (candidate.isKeyWindow) { window = candidate; break; }
+    }
+    UIViewController *root = window.rootViewController;
+    if (!root) return;
+    class_replaceMethod(root.class, @selector(prefersHomeIndicatorAutoHidden), imp_implementationWithBlock(^BOOL(id object) { return hide; }), "B@:");
+    class_replaceMethod(root.class, @selector(preferredScreenEdgesDeferringSystemGestures), imp_implementationWithBlock(^UIRectEdge(id object) { return hide ? UIRectEdgeAll : UIRectEdgeNone; }), "Q@:");
+    [root setNeedsUpdateOfHomeIndicatorAutoHidden];
+    [root setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
+}
 + (BOOL)configureScriptKey:(NSData *)key {
     if(attempted || (key && key.length!=32)) return NO;
     pending_script_key=[key copy]; return YES;
@@ -345,7 +360,7 @@ static bool change_hold(NSMutableDictionary *holds, id key, BOOL pressed) {
     } else {
         position.x = CLAMP(position.x, 0, MAX(0, view.bounds.size.width * scale - 1));
         position.y = CLAMP(position.y, 0, MAX(0, view.bounds.size.height * scale - 1));
-        delta = position - old;
+        if (!relative) delta = position - old;
     }
     Ref<InputEventMouseMotion> event;
     event.instantiate();

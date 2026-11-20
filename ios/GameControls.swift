@@ -28,6 +28,10 @@ private final class PlayerGameContainer: UIViewController {
         view.backgroundColor = .black
         addChild(engine); view.addSubview(engine.view); engine.didMove(toParent: self)
     }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        PlayerRuntime.configureGameSystemGestures()
+    }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         let bounds = view.bounds
@@ -161,7 +165,7 @@ struct GameScreen: View {
         .sheet(isPresented:$showingGestures) {
             GestureEditor(value:profile.gestures ?? TouchGestures(),onSave:{ value in
                 profile.gestures=value
-                if value.secondFingerButton != nil || value.enabled { profile.mouseMode = "trackpad"; profile.setMouseEnabled(true) }
+                if value.secondFingerButton != nil || value.enabled || value.edgeScroll != nil || value.cameraLook != nil { profile.mouseMode = "trackpad"; profile.setMouseEnabled(true) }
                 _ = library.saveControls(profile,visible:showButtons,for:session.id)
             })
         }

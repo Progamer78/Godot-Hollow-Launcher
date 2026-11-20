@@ -191,6 +191,14 @@ struct TouchGestures: Codable, Equatable {
     var twoFingerTap="Mouse Right"
     var threeFingerTap="Escape"
     var scroll=true
+    var scrollSpeed: Double?
+    var reverseScroll: Bool?
+    var edgeScroll: String?
+    var edgeScrollWidth: Double?
+    var cameraLook: String?
+    var cameraButton: String?
+    var cameraMouseButton: Int? { cameraButton == "none" ? nil : (cameraButton == "left" ? 1 : 2) }
+    var scrollPointsPerStep: Double { 24 / min(4, max(0.25, scrollSpeed ?? 1)) }
     var twoFingerDrag: Bool?
     var twoFingerDragButton: String?
     var twoFingerDoubleTap: String?
@@ -198,10 +206,30 @@ struct TouchGestures: Codable, Equatable {
     var secondFingerButton: Int? { secondFingerClick == "left" ? 1 : (secondFingerClick == "right" ? 2 : nil) }
     var dragMouseButton: Int { twoFingerDragButton == "right" ? 2 : 1 }
     mutating func constrain() {
+        if let speed = scrollSpeed { scrollSpeed = speed.isFinite ? min(4, max(0.25, speed)) : 1 }
+        if let width = edgeScrollWidth { edgeScrollWidth = width.isFinite ? min(80, max(20, width)) : 36 }
+        if let edge = edgeScroll, !["left", "right"].contains(edge) { edgeScroll = nil }
+        if let area = cameraLook, !["right", "full"].contains(area) { cameraLook = nil }
+        if let button = cameraButton, !["none", "left", "right"].contains(button) { cameraButton = nil }
         if let key = twoFingerDoubleTap { twoFingerDoubleTap = String(key.prefix(32)) }
         twoFingerTap=String(twoFingerTap.prefix(32)); threeFingerTap=String(threeFingerTap.prefix(32))
         if let click = secondFingerClick, !["left", "right"].contains(click) { secondFingerClick = nil }
         if let button = twoFingerDragButton, !["left", "right"].contains(button) { twoFingerDragButton = nil }
+    }
+}
+
+struct MouseWheelMotion {
+    private var remainder: Double = 0
+    mutating func reset() { remainder = 0 }
+    mutating func steps(delta: Double, profile: TouchGestures) -> Int {
+        guard delta.isFinite else { return 0 }
+        remainder += delta * (profile.reverseScroll == true ? -1 : 1)
+        let count = max(-24, min(24, remainder / profile.scrollPointsPerStep))
+        let steps = Int(count.rounded(.towardZero))
+        remainder -= Double(steps) * profile.scrollPointsPerStep
+        // Do not keep a backlog of thousands of wheel events after a large jump.
+        if abs(count) == 24 { remainder = 0 }
+        return steps
     }
 }
 

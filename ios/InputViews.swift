@@ -104,15 +104,19 @@ struct MouseSurface: UIViewRepresentable {
     static func dismantleUIView(_ view: MouseTouchView, coordinator: ()) { view.stop() }
 }
 
-final class MouseTouchView: UIView {
+final class MouseTouchView: UIView, UIGestureRecognizerDelegate {
     private var gestureProfile=TouchGestures()
     private var gestureRecognizersOwned: [UIGestureRecognizer]=[]
-    private var scrollRemainder: CGFloat=0
+    private var wheel = MouseWheelMotion()
+    private var edgeTouch: UITouch?
+    private var edgeLastY: CGFloat = 0
+    private let edgeIndicator = UIView()
     var mode = "trackpad"
     var sensitivity: CGFloat = 1
     private var last = CGPoint.zero
     private var distance: CGFloat = 0
     private var heldButton: Int?
+    private var cameraTouch = false
     private var tracking = false
     private var primaryTouch: UITouch?
     private var secondTouch: UITouch?
@@ -133,8 +137,11 @@ final class MouseTouchView: UIView {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
         backgroundColor = .clear
+        edgeIndicator.backgroundColor = UIColor.white.withAlphaComponent(0.25)
+        edgeIndicator.layer.cornerRadius = 2; edgeIndicator.isUserInteractionEnabled = false
         cursor.isUserInteractionEnabled = false
         addSubview(cursor)
+        addSubview(edgeIndicator)
         let path = UIBezierPath()
         path.move(to: .zero); path.addLine(to: CGPoint(x: 1, y: 24)); path.addLine(to: CGPoint(x: 7, y: 18))
         path.addLine(to: CGPoint(x: 12, y: 28)); path.addLine(to: CGPoint(x: 17, y: 25)); path.addLine(to: CGPoint(x: 12, y: 16))
@@ -151,7 +158,7 @@ final class MouseTouchView: UIView {
         two.require(toFail:three)
         let pan=UIPanGestureRecognizer(target:self,action:#selector(scrollGesture(_:))); pan.minimumNumberOfTouches=2; pan.maximumNumberOfTouches=2
         gestureRecognizersOwned=[two,three,doubleTwo,pan]
-        for recognizer in gestureRecognizersOwned { recognizer.isEnabled=false; addGestureRecognizer(recognizer) }
+        for recognizer in gestureRecognizersOwned { recognizer.delegate = self; recognizer.isEnabled=false; addGestureRecognizer(recognizer) }
         NotificationCenter.default.addObserver(self, selector: #selector(cancelTouch), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(cancelTouch), name: Notification.Name("GodotPlayerReleaseInputs"), object: nil)
     }
@@ -159,6 +166,7 @@ final class MouseTouchView: UIView {
     func configureGestures(_ value: TouchGestures) {
         if gestureProfile != value { cancelTouch() }
         gestureProfile=value
+        setNeedsLayout()
         for recognizer in gestureRecognizersOwned { recognizer.isEnabled=value.enabled && mode == "trackpad" && !secondFingerEnabled }
         gestureRecognizersOwned.last?.isEnabled=value.enabled && value.scroll && mode == "trackpad" && !secondFingerEnabled && !dragEnabled
     }
@@ -168,13 +176,31 @@ final class MouseTouchView: UIView {
     @objc private func threeFingerTap() { gestureKey(gestureProfile.threeFingerTap) }
     @objc private func scrollGesture(_ gesture: UIPanGestureRecognizer) {
         cancelTouch()
-        if gesture.state == .began { scrollRemainder=0 }
+        if gesture.state == .began { wheel.reset() }
         let delta=gesture.translation(in:self).y; gesture.setTranslation(.zero,in:self)
-        scrollRemainder += delta
-        while abs(scrollRemainder)>=24 {
-            PlayerRuntime.scrollMouse(scrollRemainder>0 ? 1 : -1)
-            scrollRemainder += scrollRemainder>0 ? -24 : 24
-        }
+        sendWheel(delta)
+    }
+    private func sendWheel(_ delta: CGFloat) {
+        let steps = wheel.steps(delta: Double(delta), profile: gestureProfile)
+        for _ in 0..<abs(steps) { PlayerRuntime.scrollMouse(steps > 0 ? 1 : -1) }
+    }
+    private func inScrollStrip(_ point: CGPoint) -> Bool {
+        guard mode == "trackpad", let edge = gestureProfile.edgeScroll else { return false }
+        let width = CGFloat(gestureProfile.edgeScrollWidth ?? 36)
+        return edge == "left" ? point.x < width : point.x >= bounds.width - width
+    }
+    private func inCameraArea(_ point: CGPoint) -> Bool {
+        mode == "trackpad" && (gestureProfile.cameraLook == "full" || (gestureProfile.cameraLook == "right" && point.x >= bounds.width / 2))
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        !inScrollStrip(touch.location(in: self)) && !inCameraArea(touch.location(in: self))
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        edgeIndicator.isHidden = mode != "trackpad" || gestureProfile.edgeScroll == nil
+        let width = CGFloat(gestureProfile.edgeScrollWidth ?? 36)
+        let x = gestureProfile.edgeScroll == "left" ? width / 2 : bounds.width - width / 2
+        edgeIndicator.frame = CGRect(x: x - 2, y: bounds.height * 0.3, width: 4, height: bounds.height * 0.4)
     }
     deinit { displayLink?.invalidate(); NotificationCenter.default.removeObserver(self) }
     override func didMoveToWindow() {
@@ -195,6 +221,7 @@ final class MouseTouchView: UIView {
         dragActive = false
         tracking = false
         primaryTouch = nil; secondTouch = nil
+        edgeTouch = nil; cameraTouch = false
     }
     @objc private func refreshCursor(_ link: CADisplayLink) {
         updateCursor()
@@ -212,9 +239,16 @@ final class MouseTouchView: UIView {
         let point = PlayerRuntime.mousePosition(in: self)
         let size = cursor.image?.size ?? CGSize(width: 24, height: 30)
         cursor.frame = CGRect(x: point.x - hotspot.x, y: point.y - hotspot.y, width: size.width, height: size.height)
-        cursor.isHidden = !PlayerRuntime.mouseCursorVisible()
+        cursor.isHidden = cameraTouch || !PlayerRuntime.mouseCursorVisible()
     }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        var touches = touches
+        if edgeTouch == nil, let touch = touches.first(where: { inScrollStrip($0.location(in: self)) }) {
+            edgeTouch = touch; edgeLastY = touch.location(in: self).y; wheel.reset()
+            touches.remove(touch)
+        }
+        if touches.isEmpty { return }
+        if cameraTouch && tracking { return }
         if secondFingerEnabled || dragEnabled, tracking, let primary = primaryTouch {
             if activeTouches(event, fallback: touches) > 2 { secondDistance = .infinity; return }
             if secondTouch == nil, let touch = touches.first(where: { $0 !== primary }) {
@@ -232,6 +266,12 @@ final class MouseTouchView: UIView {
         distance = 0
         tracking = true
         primaryTouch = touch
+        cameraTouch = inCameraArea(last)
+        if cameraTouch {
+            heldButton = gestureProfile.cameraMouseButton
+            if let button = heldButton { PlayerRuntime.setMouseButton(button, pressed: true) }
+            return
+        }
         if mode == "direct" && !PlayerRuntime.mouseCaptured() {
             PlayerRuntime.moveMouse(last, from: self, relative: false)
             PlayerRuntime.setMouseButton(1, pressed: true)
@@ -239,6 +279,10 @@ final class MouseTouchView: UIView {
         }
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let edge = edgeTouch, touches.contains(edge) {
+            let y = edge.location(in: self).y; sendWheel(y - edgeLastY); edgeLastY = y
+            if touches.count == 1 { return }
+        }
         if let second = secondTouch, touches.contains(second) {
             let point = second.location(in: self)
             secondDistance = max(secondDistance, hypot(point.x - secondOrigin.x, point.y - secondOrigin.y))
@@ -257,7 +301,7 @@ final class MouseTouchView: UIView {
             }
             return
         }
-        if !secondFingerEnabled && activeTouches(event, fallback:touches) != 1 { cancelTouch(); return }
+        if !cameraTouch && !secondFingerEnabled && activeTouches(event, fallback:touches) != 1 { cancelTouch(); return }
         guard tracking, let touch = primaryTouch, touches.contains(touch) else { return }
         let point = touch.location(in: self)
         let delta = CGPoint(x: point.x - last.x, y: point.y - last.y)
@@ -267,6 +311,7 @@ final class MouseTouchView: UIView {
         last = point
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let edge = edgeTouch, touches.contains(edge) { edgeTouch = nil; wheel.reset() }
         if dragEnabled, let second = secondTouch, touches.contains(second) {
             if let button = heldButton { PlayerRuntime.setMouseButton(button, pressed: false) }
             heldButton = nil; dragActive = false; secondTouch = nil
@@ -284,19 +329,20 @@ final class MouseTouchView: UIView {
         }
         guard let primary = primaryTouch, touches.contains(primary) else { return }
         guard tracking else { return }
-        if heldButton == nil && distance < 8 {
+        if !cameraTouch && heldButton == nil && distance < 8 {
             PlayerRuntime.setMouseButton(1, pressed: true)
             PlayerRuntime.setMouseButton(1, pressed: false)
         }
         cancelTouch()
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let edge = edgeTouch, touches.contains(edge) { edgeTouch = nil; wheel.reset() }
         if let primary = primaryTouch, touches.contains(primary) { cancelTouch() }
         else if let second = secondTouch, touches.contains(second) { cancelTouch() }
     }
     private func activeTouches(_ event: UIEvent?, fallback: Set<UITouch>) -> Int {
         // A finger holding a virtual key or a different joystick belongs to
         // that view, not to this trackpad's gesture. Keep those inputs concurrent.
-        (event?.touches(for:self) ?? fallback).filter { $0.phase != .ended && $0.phase != .cancelled }.count
+        (event?.touches(for:self) ?? fallback).filter { $0 !== edgeTouch && $0.phase != .ended && $0.phase != .cancelled }.count
     }
 }
