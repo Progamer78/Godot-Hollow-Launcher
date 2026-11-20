@@ -28,10 +28,6 @@ private final class PlayerGameContainer: UIViewController {
         view.backgroundColor = .black
         addChild(engine); view.addSubview(engine.view); engine.didMove(toParent: self)
     }
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        PlayerRuntime.configureGameSystemGestures()
-    }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         let bounds = view.bounds
@@ -42,6 +38,7 @@ private final class PlayerGameContainer: UIViewController {
     }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        PlayerRuntime.configureGameSystemGestures()
         if #available(iOS 16.0, *) {
             view.window?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
             let mask: UIInterfaceOrientationMask = orientation == "portrait" ? .portrait : (orientation == "landscape" ? .landscape : [.portrait, .landscape])

@@ -77,7 +77,9 @@ def run(output):
     ios = sorted([r for r in runtimes if r.get("isAvailable") and ".iOS-" in r["identifier"]], key=lambda r: tuple(map(int, r["version"].split("."))))
     if not ios:
         raise RuntimeError("No available iOS simulator runtime on this runner.")
-    runtime = ios[-1]["identifier"]
+    # Match the graphics check's oldest supported image. Reusing the mounted
+    # runtime avoids a second expensive CoreSimulator image migration/boot.
+    runtime = ios[0]["identifier"]
     devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "--json"], text=True))["devices"].get(runtime, [])
     phones = [d for d in devices if d["name"].startswith("iPhone") and d.get("deviceTypeIdentifier")]
     if not phones:

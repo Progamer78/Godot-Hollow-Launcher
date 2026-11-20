@@ -158,7 +158,8 @@ jobs:
           PY
       - name: Patch and verify player integration
         run: |
-          python3 tools/check_ios_graphics.py .cache/godot-source build/ios-graphics
+          mkdir -p build/graphics-source/platform/ios
+          cp .cache/godot-source/platform/ios/display_layer_ios.mm build/graphics-source/platform/ios/
           python3 tools/patch_engine.py .cache/godot-source
           python3 tools/patch_dotnet.py .cache/godot-source
           python3 - <<'PY'
@@ -179,6 +180,8 @@ jobs:
             -import-objc-header .cache/godot-source/drivers/apple_embedded/bridging_header_apple_embedded.h \
             .cache/godot-source/drivers/apple_embedded/*.swift \
             2>&1 | tee build/ios-typecheck.log
+      - name: Verify iOS graphics and save-directory behavior after type-check
+        run: python3 tools/check_ios_graphics.py build/graphics-source build/ios-graphics
       - name: Compile and link archive importer for iPhone before building engines
         run: |
           set -o pipefail
