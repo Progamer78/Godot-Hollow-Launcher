@@ -584,6 +584,21 @@ do {
 print("Persistent search state, pagination, scene inspector and pin ordering/selection passed")
 
 do {
+    let state = GameToolsState(); state.candidateCount = 123
+    let busy = try JSONDecoder().decode(ToolReply.self, from: Data(#"{"ok":true,"searching":true}"#.utf8))
+    let done = try JSONDecoder().decode(ToolReply.self, from: Data(#"{"ok":true,"searching":false,"snapshotCount":2505}"#.utf8))
+    state.sceneReply = busy; state.activityReply = busy
+    var calls = 0
+    state.setInspectionActive(true, send: { _ in calls += 1; return done })
+    let deadline = Date().addingTimeInterval(2)
+    while calls < 2 && Date() < deadline { _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01)) }
+    require(calls == 2 && state.activityReply?.searching == false && state.sceneReply?.searching == false && state.candidateCount == 123, "Scene jobs finish independently without consuming Search candidates")
+    state.activityReply = busy; state.scheduleInspection(); state.setInspectionActive(false)
+    _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    require(calls == 2, "Closing tools invalidates queued scene work")
+}
+
+do {
     let state = GameToolsState()
     let numericPool = try JSONDecoder().decode(ToolReply.self, from: Data(#"{"ok":true,"searchStarted":true,"searchKind":"any","searchTypes":["number"],"candidateCount":200000,"rows":[{"object":"123","path":[{"kind":"property","name":"money"}],"label":"/root/Game.money","type":"int","value":"0"}]}"#.utf8))
     state.receive(numericPool)

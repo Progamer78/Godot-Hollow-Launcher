@@ -6,7 +6,6 @@ struct SceneToolsPanel: View {
     let canEdit: Bool
     let onEdit: (ToolStat) -> Void
     @State private var selected: ToolSceneNode?
-    private let progressTimer = Timer.publish(every: 0.03, on: .main, in: .common).autoconnect()
 
     var body: some View {
         List {
@@ -33,7 +32,7 @@ struct SceneToolsPanel: View {
                 if let reply = state.activityReply {
                     if reply.ok {
                         Text("\(reply.changedCount ?? 0) changed · \(reply.snapshotCount ?? 0) captured · \(reply.staleCount ?? 0) unavailable").font(.caption)
-                        if reply.searching == true { ProgressView(reply.searchDiscovery == true ? "Capturing snapshot…" : "Comparing changes…") }
+                        if reply.searching == true { ProgressView(reply.searchDiscovery == true ? "Capturing snapshot—wait before playing…" : "Comparing changes…") }
                         if reply.truncated == true { Text("Snapshot incomplete: scan budget reached.").font(.caption).foregroundColor(.orange) }
                         ForEach(reply.rows ?? []) { stat in
                             Button { onEdit(stat) } label: { ToolStatRow(stat: stat) }.disabled(!canEdit)
@@ -61,10 +60,8 @@ struct SceneToolsPanel: View {
             }
         }.listStyle(InsetGroupedListStyle())
         .onAppear(perform: refresh)
-        .onReceive(progressTimer) { _ in
-            if state.sceneReply?.searching == true { state.sceneReply = ToolsBridge.send(["action": "continue_scene"]) }
-            if state.activityReply?.searching == true { state.activityReply = ToolsBridge.send(["action": "continue_activity"]) }
-        }
+        .onChange(of: state.sceneReply?.searching) { _ in state.scheduleInspection() }
+        .onChange(of: state.activityReply?.searching) { _ in state.scheduleInspection() }
         .sheet(item: $selected) { node in
             SceneNodeInspector(object: node.object) { chosen in
                 state.scope = chosen.object; state.scopeLabel = chosen.path; state.tab = "search"; selected = nil

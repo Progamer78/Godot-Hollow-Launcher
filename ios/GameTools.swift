@@ -58,10 +58,11 @@ struct GameTools: View {
             .navigationTitle("Game Tools")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) { if state.tab == "pins" { EditButton() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { presentation.wrappedValue.dismiss() } } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { presentation.wrappedValue.dismiss() }.disabled(state.activityReply?.searching == true) } }
         }
         .navigationViewStyle(StackNavigationViewStyle())
         .onAppear {
+            state.setInspectionActive(true, send: ToolsBridge.send)
             GameInput.release()
             let reply = ToolsBridge.send(["action": "pause", "enabled": true])
             paused = reply.ok
@@ -79,7 +80,8 @@ struct GameTools: View {
             refreshFreezes()
         }
         .onChange(of: state.tab) { _ in refreshFreezes(); if state.tab == "search" { refreshSearch() } }
-        .onDisappear { _ = ToolsBridge.send(["action": "pause", "enabled": false]) }
+        .onDisappear { state.setInspectionActive(false); _ = ToolsBridge.send(["action": "pause", "enabled": false]) }
+        .interactiveDismissDisabled(state.activityReply?.searching == true)
         .sheet(item: $selected) { stat in
             StatEditor(stat: stat, gameID: gameID) {
                 refreshFreezes()

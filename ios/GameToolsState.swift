@@ -50,6 +50,37 @@ final class GameToolsState: ObservableObject {
     private var scheduled = false
     private var searchGeneration = 0
     private var lastProgress = Date.distantPast
+    private var inspectionActive = false
+    private var inspectionScheduled = false
+    private var inspectionGeneration = 0
+    private var inspectionProgress = Date.distantPast
+    func setInspectionActive(_ active: Bool, send: (([String: Any]) -> ToolReply)? = nil) {
+        if let send = send { searchSender = send }
+        inspectionActive = active
+        if !active { inspectionGeneration += 1; inspectionScheduled = false }
+        else { scheduleInspection() }
+    }
+    func scheduleInspection() {
+        guard inspectionActive, !inspectionScheduled, searchSender != nil,
+              sceneReply?.searching == true || activityReply?.searching == true else { return }
+        inspectionScheduled = true
+        let generation = inspectionGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.001) { [weak self] in
+            guard let self = self, self.inspectionActive, self.inspectionGeneration == generation, let send = self.searchSender else { return }
+            self.inspectionScheduled = false
+            let publish = Date().timeIntervalSince(self.inspectionProgress) >= 0.1
+            if self.sceneReply?.searching == true {
+                let reply = send(["action": "continue_scene"])
+                if publish || reply.searching != true || !reply.ok { self.sceneReply = reply }
+            }
+            if self.activityReply?.searching == true {
+                let reply = send(["action": "continue_activity", "progressOnly": !publish])
+                if publish || reply.searching != true || !reply.ok { self.activityReply = reply }
+            }
+            if publish { self.inspectionProgress = Date() }
+            self.scheduleInspection()
+        }
+    }
 
     // Yield to UIKit between bounded native batches, without the old 200 ms
     // heartbeat delay. Publish progress at 10 Hz, rather than redrawing the

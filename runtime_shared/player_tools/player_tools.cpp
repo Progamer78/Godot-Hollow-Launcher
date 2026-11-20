@@ -989,7 +989,8 @@ Dictionary PlayerTools::scene_changes(const Dictionary &command) {
     const Vector<int> &changes = activity_comparing ? activity_working_changes : activity_changes;
     const int pages = MAX(1, (changes.size() + 99) / 100); activity_page = CLAMP(activity_page, 0, pages - 1);
     Array displayed;
-    for (int i = activity_page * 100; i < MIN(changes.size(), (activity_page + 1) * 100); i++) {
+    const bool include_rows = !bool(command.get("progressOnly", false)) || (activity_ready && !activity_comparing);
+    for (int i = activity_page * 100; include_rows && i < MIN(changes.size(), (activity_page + 1) * 100); i++) {
         const IndexedValue &candidate = activity_index->number_candidates[changes[i]]; Variant value;
         if (!indexed_value(candidate, activity_index->candidate_locations, value)) continue;
         const IndexedLocation &location = activity_index->candidate_locations[candidate.location];
